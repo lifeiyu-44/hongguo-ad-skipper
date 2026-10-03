@@ -1,10 +1,8 @@
 package com.hongguo.adskip
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import android.view.View
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.TextView
@@ -28,10 +26,8 @@ class MainActivity : AppCompatActivity() {
         val btnAccessibility = findViewById<Button>(R.id.btnAccessibility)
         val btnOpenTarget = findViewById<Button>(R.id.btnOpenTarget)
         val btnTestSwipe = findViewById<Button>(R.id.btnTestSwipe)
-        val btnOverlayPermission = findViewById<Button>(R.id.btnOverlayPermission)
         val btnResetTargets = findViewById<Button>(R.id.btnResetTargets)
         val switchAuto = findViewById<MaterialSwitch>(R.id.switchAuto)
-        val switchOverlay = findViewById<MaterialSwitch>(R.id.switchOverlay)
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
         val delayLabel = findViewById<TextView>(R.id.delayLabel)
         val fallbackBar = findViewById<SeekBar>(R.id.fallbackBar)
@@ -43,13 +39,6 @@ class MainActivity : AppCompatActivity() {
         switchAuto.isChecked = Prefs.isAutoSwipeEnabled(this)
         switchAuto.setOnCheckedChangeListener { _, checked ->
             Prefs.setAutoSwipeEnabled(this, checked)
-        }
-
-        switchOverlay.isChecked = Prefs.isOverlayEnabled(this)
-        switchOverlay.setOnCheckedChangeListener { _, checked ->
-            Prefs.setOverlayEnabled(this, checked)
-            refreshOverlayPermissionButton(btnOverlayPermission)
-            if (checked && !Settings.canDrawOverlays(this)) requestOverlayPermission()
         }
 
         delayBar.progress = Prefs.getExtraDelayMs(this)
@@ -101,7 +90,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.toast_service_not_running, Toast.LENGTH_SHORT).show()
             }
         }
-        btnOverlayPermission.setOnClickListener { requestOverlayPermission() }
         btnClearLog.setOnClickListener { AdSkipService.clearLogs() }
 
         lifecycleScope.launch {
@@ -152,7 +140,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshOverlayPermissionButton(findViewById(R.id.btnOverlayPermission))
         refreshTargetsText(findViewById(R.id.targetsText))
     }
 
@@ -160,22 +147,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun snapFallbackSec(progress: Int): Int = ((progress + 3000) / 1000).coerceIn(3, 28)
 
-    private fun refreshOverlayPermissionButton(btn: Button) {
-        btn.visibility = if (Settings.canDrawOverlays(this)) View.GONE else View.VISIBLE
-    }
-
     private fun refreshTargetsText(tv: TextView) {
         val pkgs = Prefs.getTargetPackages(this).sorted().joinToString("、")
         tv.text = getString(R.string.targets_value, pkgs)
-    }
-
-    private fun requestOverlayPermission() {
-        startActivity(
-            Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-        )
     }
 
     private fun openTargetApp() {

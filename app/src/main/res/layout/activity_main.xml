@@ -140,21 +140,6 @@
                     android:layout_marginTop="12dp"
                     android:text="@string/switch_auto" />
 
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switchOverlay"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/switch_overlay" />
-
-                <Button
-                    android:id="@+id/btnOverlayPermission"
-                    style="?attr/materialButtonOutlinedStyle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/btn_overlay_grant" />
-
                 <TextView
                     android:id="@+id/delayLabel"
                     android:layout_width="match_parent"

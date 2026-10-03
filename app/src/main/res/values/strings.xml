@@ -10,7 +10,6 @@
     <string name="btn_accessibility_off">去开启无障碍服务</string>
     <string name="btn_open_target">打开红果短剧</string>
     <string name="btn_test_swipe">测试上滑</string>
-    <string name="btn_overlay_grant">授予悬浮窗权限</string>
     <string name="btn_reset_targets">重置监测应用</string>
     <string name="btn_clear_log">清空</string>
 
@@ -18,7 +17,6 @@
     <string name="section_log">运行日志</string>
 
     <string name="switch_auto">自动跳过广告（倒计时结束后自动上滑）</string>
-    <string name="switch_overlay">播放时显示状态悬浮窗</string>
 
     <string name="state_idle">待机：未监测到红果短剧</string>
     <string name="state_monitoring">正在监测红果短剧…</string>

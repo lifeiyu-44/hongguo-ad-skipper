@@ -3,6 +3,8 @@ package com.hongguo.adskip
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -23,6 +25,7 @@ import java.util.Locale
  * 3. 倒计时归零 / 兜底等待到点后，模拟上滑手势进入下一集；翻页失败自动重试
  *
  * 识别基于无障碍节点文字，在本机完成，不联网。
+ * 屏幕上不显示任何悬浮内容；断网时自动暂停，避免把断网页面误判成广告。
  */
 class AdSkipService : AccessibilityService() {
 
@@ -97,6 +100,7 @@ class AdSkipService : AccessibilityService() {
     private var chipFirstSeenAt = 0L       // 「广告」角标首次出现时间（连续出现判定用）
     private var retryCount = 0             // 当前这波广告已尝试次数
     private var probeTick = 0
+    private var offlineLogged = false      // 断网提示只记一次，避免日志刷屏
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -132,7 +136,6 @@ class AdSkipService : AccessibilityService() {
         countdownRemain.value = -1
         mode = Mode.IDLE
         mainHandler.removeCallbacks(ticker)
-        OverlayController.update(this, null)
         super.onDestroy()
     }
 
@@ -147,7 +150,30 @@ class AdSkipService : AccessibilityService() {
 
     // ------------------------------------------------------------------ 扫描
 
+    /** 设备当前是否能上网（断网时暂停一切识别与滑动，避免误翻页） */
+    private fun isOnline(): Boolean {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return true
+        val nw = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(nw) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
     private fun scanOnce() {
+        if (!isOnline()) {
+            if (mode != Mode.IDLE) {
+                resetToIdle("网络已断开，取消本次自动跳过")
+            } else if (!offlineLogged) {
+                offlineLogged = true
+                appendLog("网络已断开，自动跳过暂停")
+            }
+            publishState(State.IDLE, -1)
+            return
+        }
+        if (offlineLogged) {
+            offlineLogged = false
+            appendLog("网络已恢复，继续监测")
+        }
+
         val root = rootInActiveWindow ?: return
         val pkg = root.packageName?.toString() ?: return
         val now = SystemClock.elapsedRealtime()
@@ -155,7 +181,6 @@ class AdSkipService : AccessibilityService() {
         if (!Prefs.isAutoSwipeEnabled(this)) {
             if (mode != Mode.IDLE) resetToIdle()
             publishState(State.IDLE, -1)
-            OverlayController.update(this, null)
             return
         }
 
@@ -166,7 +191,6 @@ class AdSkipService : AccessibilityService() {
             if (probeTick % PROBE_EVERY_N_TICKS == 0) probeUnknownApp(root, pkg)
             if (mode != Mode.IDLE) resetToIdle("已离开播放页，取消本次自动上滑")
             publishState(State.IDLE, -1)
-            OverlayController.update(this, null)
             return
         }
 
@@ -224,7 +248,6 @@ class AdSkipService : AccessibilityService() {
             chipFirstSeenAt = 0L
             if (mode != Mode.IDLE) resetToIdle("广告已结束，恢复正常监测")
             publishState(State.MONITORING, -1)
-            OverlayController.update(this, null)
             return
         }
 
@@ -297,16 +320,12 @@ class AdSkipService : AccessibilityService() {
             Mode.COUNTING -> {
                 val remain = ((deadlineAt - now) / 1000L).toInt() + 1
                 publishState(State.AD_COUNTDOWN, remain)
-                // 悬浮窗只显示一个极小的秒数，详细状态看 App 日志页
-                OverlayController.update(this, "${remain}s")
             }
             Mode.FALLBACK -> {
                 publishState(State.AD_FALLBACK, -1)
-                OverlayController.update(this, "•")
             }
             Mode.IDLE -> {
                 publishState(State.MONITORING, -1)
-                OverlayController.update(this, null)
             }
         }
     }
@@ -342,7 +361,6 @@ class AdSkipService : AccessibilityService() {
         }
         if (clicked) {
             appendLog("$reason：已点击「跳过」（第 $retryCount 次尝试）✓")
-            OverlayController.update(this, "✓")
         } else {
             swipeUp(reason)
         }
@@ -357,9 +375,6 @@ class AdSkipService : AccessibilityService() {
         val n = skipCount.value + 1
         skipCount.value = n
         Prefs.setSkipCount(this, n)
-        mainHandler.postDelayed({
-            OverlayController.update(this@AdSkipService, null)
-        }, 1200L)
     }
 
     private fun swipeUp(reason: String) {
@@ -389,7 +404,6 @@ class AdSkipService : AccessibilityService() {
             }
         }, null)
         if (!dispatched) appendLog("上滑手势派发失败")
-        OverlayController.update(this, "✓")
     }
 
     private fun resetToIdle(msg: String? = null) {
