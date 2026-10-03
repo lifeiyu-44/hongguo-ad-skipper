@@ -4,6 +4,13 @@
 
 > 全部识别基于无障碍服务读取的屏幕文字，在本机完成，**不联网、不上传任何数据**。
 
+## 下载安装（安卓）
+
+- **直接下载 APK**：[HongguoAdSkipper-v1.8.apk](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases/download/v1.8/HongguoAdSkipper-v1.8.apk)
+- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)
+
+手机/平板通用，支持 Android 7.0 及以上。下载后安装（提示未知来源时允许），再按下方「使用步骤」开启无障碍服务即可。
+
 ---
 
 ## 工作原理
