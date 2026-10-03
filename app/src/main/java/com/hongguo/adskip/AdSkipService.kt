@@ -56,6 +56,9 @@ class AdSkipService : AccessibilityService() {
         /** 红果拒绝滑动时的提示「倒计时结束后即可滑动」：出现说明仍在锁定期，应顺延重试 */
         val LOCKED_TOAST_REGEX = Regex("""倒计时结束后""")
 
+        /** 直播类购物广告的特征文字（无「广告」角标、无倒计时）：直播中/讲解中/已售N件 */
+        val LIVE_AD_REGEX = Regex("""直播中|讲解中|已售\s*\d+""")
+
         private const val AD_LABEL = "广告"
 
         // ---- 扫描节奏 ----
@@ -268,6 +271,8 @@ class AdSkipService : AccessibilityService() {
         var adChipText: String? = null      // 触发角标识别的原始文字（诊断用）
         var unlocked: Boolean = false
         var unlockText: String? = null      // 「上滑继续观看」类提示原文（诊断用）
+        var liveAd: Boolean = false
+        var liveAdText: String? = null      // 直播类广告特征原文（直播中/讲解中/已售N件）
         var lockedToast: Boolean = false    // 红果提示「倒计时结束后即可滑动」（锁定期信号）
         var skipNode: AccessibilityNodeInfo? = null
     }
@@ -319,6 +324,10 @@ class AdSkipService : AccessibilityService() {
                 result.unlocked = true
                 result.unlockText = (text ?: desc)?.take(16)
             }
+            if (!result.liveAd && (isLiveAd(text) || isLiveAd(desc))) {
+                result.liveAd = true
+                result.liveAdText = (text ?: desc)?.take(16)
+            }
             if (!result.lockedToast && (text?.contains(LOCKED_TOAST_REGEX) == true ||
                         desc?.contains(LOCKED_TOAST_REGEX) == true)
             ) {
@@ -360,7 +369,10 @@ class AdSkipService : AccessibilityService() {
 
     private fun handleInTarget(found: ScanResult, now: Long) {
         val hasCountdown = found.countdownSec >= 0
-        val hasAd = hasCountdown || found.adChip || found.unlocked || found.lockedToast
+        // 广告上下文：右上角「广告」角标，或直播类广告特征（直播中/讲解中/已售N件）
+        val adContext = found.adChip || found.liveAd
+        val adContextText = found.adChipText ?: found.liveAdText ?: "广告"
+        val hasAd = hasCountdown || adContext || found.unlocked || found.lockedToast
 
         // 屏幕上既无倒计时也无「广告」角标：广告已结束（或本来就没有），复位
         if (!hasAd) {
@@ -411,31 +423,31 @@ class AdSkipService : AccessibilityService() {
             Mode.IDLE -> {
                 if (hasCountdown) {
                     enterCounting(now, found)
-                } else if (found.adChip) {
-                    // 无倒计时广告：以右上角「广告」角标为主要信号
+                } else if (adContext) {
+                    // 无倒计时广告：右上角「广告」角标，或直播类购物广告（直播中/讲解中/已售N件）
                     if (chipFirstSeenAt == 0L) chipFirstSeenAt = now
                     if (found.unlocked) {
-                        // 角标 + 「上滑继续观看」提示同时在场：最快路径，
+                        // 广告特征 + 「上滑继续看短剧」提示同时在场：最快路径，
                         // 下一轮扫描（约350ms）确认后立即上滑
                         mode = Mode.FALLBACK
                         if (fallbackSinceAt == 0L) fallbackSinceAt = now
                         deadlineAt = now
-                        appendLog("检测到广告角标+「${found.unlockText ?: "上滑继续观看"}」提示，准备立即上滑")
+                        appendLog("检测到广告「$adContextText」+「${found.unlockText ?: "上滑继续观看"}」提示，准备立即上滑")
                     } else if (now - chipFirstSeenAt >= CHIP_CONFIRM_MS) {
                         mode = Mode.FALLBACK
                         if (fallbackSinceAt == 0L) fallbackSinceAt = now
-                        // 从角标首次出现时刻起算等待：设置 1 秒 ≈ 广告出现 1 秒后翻页
+                        // 从特征首次出现时刻起算等待：设置 1 秒 ≈ 广告出现 1 秒后翻页
                         val waitMs = Prefs.getFallbackWaitMs(this)
                         deadlineAt = chipFirstSeenAt + waitMs
                         if (deadlineAt <= now) deadlineAt = now + 200L
                         scheduleDeadlineKick(deadlineAt - now)
                         appendLog(
-                            "检测到广告角标「${found.adChipText ?: "广告"}」（右上角，无倒计时），" +
+                            "检测到广告「$adContextText」（无倒计时），" +
                                     "${waitMs / 1000}s 后尝试上滑"
                         )
                     }
                 }
-                // 无角标、无倒计时时不动作：普通剧集页的滑动提示不是广告信号
+                // 无任何广告特征时不动作：普通剧集页的滑动提示不是广告信号
             }
 
             Mode.COUNTING -> {
@@ -452,7 +464,7 @@ class AdSkipService : AccessibilityService() {
                         // 文字疑似卡死不动：硬超时兜底（唯一允许文字仍在时动作的情况）
                         attemptSkip(found.skipNode, "倒计时硬超时", countdownVisible = true)
                     }
-                } else if (found.adChip || now - lastCountdownSeenAt <= AD_GONE_GRACE_MS) {
+                } else if (adContext || now - lastCountdownSeenAt <= AD_GONE_GRACE_MS) {
                     // 倒计时文字已从屏幕消失 = 倒计时结束，按自身计时尽快上滑
                     if (now >= deadlineAt) {
                         attemptSkip(found.skipNode, "倒计时结束", countdownVisible = false)
@@ -631,6 +643,11 @@ class AdSkipService : AccessibilityService() {
     private fun isUnlockHint(s: String?): Boolean {
         if (s == null || s.length > 20) return false
         return UNLOCK_HINT_REGEX.containsMatchIn(s)
+    }
+
+    private fun isLiveAd(s: String?): Boolean {
+        if (s == null || s.length > 20) return false
+        return LIVE_AD_REGEX.containsMatchIn(s)
     }
 
     private fun AccessibilityNodeInfo.findClickableSelfOrParent(): AccessibilityNodeInfo? {
