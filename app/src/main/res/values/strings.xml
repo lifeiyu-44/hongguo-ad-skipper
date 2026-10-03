@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">红果广告跳过</string>
+    <string name="service_label">红果短剧广告自动上滑</string>
+    <string name="service_desc">在红果短剧播放广告时识别「N秒后可继续上滑」倒计时，倒计时结束后自动上滑进入下一集。所有识别均在本机完成，不联网。</string>
+
+    <string name="status_on">服务运行中</string>
+    <string name="status_off">服务未开启</string>
+    <string name="btn_accessibility_on">无障碍已开启 ✓</string>
+    <string name="btn_accessibility_off">去开启无障碍服务</string>
+    <string name="btn_open_target">打开红果短剧</string>
+    <string name="btn_test_swipe">测试上滑</string>
+    <string name="btn_overlay_grant">授予悬浮窗权限</string>
+    <string name="btn_reset_targets">重置监测应用</string>
+    <string name="btn_clear_log">清空</string>
+
+    <string name="section_settings">设置</string>
+    <string name="section_log">运行日志</string>
+
+    <string name="switch_auto">自动跳过广告（倒计时结束后自动上滑）</string>
+    <string name="switch_overlay">播放时显示状态悬浮窗</string>
+
+    <string name="state_idle">待机：未监测到红果短剧</string>
+    <string name="state_monitoring">正在监测红果短剧…</string>
+    <string name="state_countdown_fmt">检测到广告，约 %1$d 秒后自动上滑</string>
+    <string name="count_text">累计自动跳过 %1$d 个广告</string>
+    <string name="delay_value">倒计时结束后延迟 %1$d 毫秒再上滑</string>
+    <string name="targets_value">当前监测包名：%1$s</string>
+
+    <string name="toast_service_not_running">请先开启无障碍服务</string>
+    <string name="toast_target_missing">未安装应用：%1$s</string>
+
+    <string name="count_zero_literal">累计自动跳过 0 个广告</string>
+    <string name="delay_literal">倒计时结束后延迟 250 毫秒再上滑</string>
+    <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
+
+    <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
+</resources>

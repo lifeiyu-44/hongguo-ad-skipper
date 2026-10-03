@@ -1,0 +1,11 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 本机构建工具链（JDK/Android SDK，约 1GB，不入库）
+.buildtools/
