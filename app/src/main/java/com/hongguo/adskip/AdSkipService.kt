@@ -66,7 +66,7 @@ class AdSkipService : AccessibilityService() {
 
         // ---- 跳过时机 ----
         private const val DEADLINE_BUFFER_MS = 350L       // 倒计时归零后等 UI 稳定
-        private const val AFTER_SWIPE_COOLDOWN_MS = 2600L // 跳过尝试后的冷却
+        private const val AFTER_SWIPE_COOLDOWN_MS = 4000L // 跳过尝试后的冷却（等翻页动画和加载完成）
         private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
         private const val CHIP_CONFIRM_MS = 2000L         // 「广告」角标需持续出现才认定插播广告，防误判
         private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
@@ -279,6 +279,17 @@ class AdSkipService : AccessibilityService() {
             val text = node.text?.toString()
             val desc = node.contentDescription?.toString()
 
+            if (text == null && desc == null) {
+                collectChildren(node, queue)
+                continue
+            }
+            // 铁律：只认屏幕上真实可见的节点。
+            // 翻页容器里刚滑过去的页面仍留在视图树中（屏幕外），
+            // 不过滤会把上一页的广告当成当前页的广告，造成连翻多页
+            if (!isVisibleOnScreen(node, screenW, screenH)) {
+                collectChildren(node, queue)
+                continue
+            }
             if (result.countdownSec < 0) {
                 if (text != null) {
                     result.countdownSec = matchCountdown(text)
@@ -309,11 +320,24 @@ class AdSkipService : AccessibilityService() {
             if (result.skipNode == null && (isSkipText(text) || isSkipText(desc))) {
                 result.skipNode = node.findClickableSelfOrParent()
             }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
+            collectChildren(node, queue)
         }
         return result
+    }
+
+    private fun collectChildren(node: AccessibilityNodeInfo, queue: ArrayDeque<AccessibilityNodeInfo>) {
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { queue.add(it) }
+        }
+    }
+
+    /** 节点中心点是否落在屏幕范围内（屏幕外的翻页残留节点一律无视） */
+    private fun isVisibleOnScreen(node: AccessibilityNodeInfo, screenW: Int, screenH: Int): Boolean {
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        if (r.isEmpty) return false
+        if (r.right <= 0 || r.bottom <= 0 || r.left >= screenW || r.top >= screenH) return false
+        return r.centerX() in 0 until screenW && r.centerY() in 0 until screenH
     }
 
     /** 插播广告的「广告」角标固定在屏幕右上角区域（顶部 30%、右半屏） */
