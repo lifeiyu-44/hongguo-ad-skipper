@@ -68,7 +68,7 @@ class AdSkipService : AccessibilityService() {
         private const val DEADLINE_BUFFER_MS = 350L       // 倒计时归零后等 UI 稳定
         private const val AFTER_SWIPE_COOLDOWN_MS = 4000L // 跳过尝试后的冷却（等翻页动画和加载完成）
         private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
-        private const val CHIP_CONFIRM_MS = 2000L         // 「广告」角标需持续出现才认定插播广告，防误判
+        private const val CHIP_CONFIRM_MS = 700L          // 角标需连续出现约2个扫描周期才认定，防单帧误判
         private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
         private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
@@ -408,13 +408,15 @@ class AdSkipService : AccessibilityService() {
                     lastCountdownSeenAt = now
                     appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
                 } else if (found.adChip) {
-                    // 无倒计时的广告：角标需持续出现一小段时间才认定，防止瞬时文字误判
+                    // 无倒计时的广告：角标需连续出现一小段时间才认定，防止瞬时文字误判
                     if (chipFirstSeenAt == 0L) chipFirstSeenAt = now
                     if (now - chipFirstSeenAt >= CHIP_CONFIRM_MS) {
                         mode = Mode.FALLBACK
                         if (fallbackSinceAt == 0L) fallbackSinceAt = now
+                        // 从角标首次出现时刻起算等待：设置 1 秒 ≈ 广告出现 1 秒后翻页
                         val waitMs = Prefs.getFallbackWaitMs(this)
-                        deadlineAt = now + waitMs
+                        deadlineAt = chipFirstSeenAt + waitMs
+                        if (deadlineAt <= now) deadlineAt = now + 200L
                         appendLog(
                             "检测到广告角标「${found.adChipText ?: "广告"}」（右上角，无倒计时），" +
                                     "${waitMs / 1000}s 后尝试上滑"
