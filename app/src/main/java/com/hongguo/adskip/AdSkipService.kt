@@ -48,9 +48,13 @@ class AdSkipService : AccessibilityService() {
         /**
          * 「上滑继续观看短剧」「上滑观看下一集」等无数字的解锁提示：
          * 红果在广告可跳过时显示，出现即说明现在就能上滑（无倒计时广告的可靠信号）。
-         * 注意不匹配「上滑查看详情」——那是进商城的，不能滑。
+         * 必须以「上滑」开头：锁定期文案「N秒后可继续上滑观看短剧」也含「上滑观看」，
+         * 但以「N秒后」开头，用锚定开头来区分；「上滑查看详情」（进商城）不匹配。
          */
-        val UNLOCK_HINT_REGEX = Regex("""上滑[^0-9]{0,8}?(继续|观看|进入|下一集)""")
+        val UNLOCK_HINT_REGEX = Regex("""^[^0-9]{0,4}上滑[^0-9]{0,4}?(继续|观看|进入|下一集)""")
+
+        /** 红果拒绝滑动时的提示「倒计时结束后即可滑动」：出现说明仍在锁定期，应顺延重试 */
+        val LOCKED_TOAST_REGEX = Regex("""倒计时结束后""")
 
         private const val AD_LABEL = "广告"
 
@@ -66,7 +70,8 @@ class AdSkipService : AccessibilityService() {
         private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
         private const val CHIP_CONFIRM_MS = 2000L         // 「广告」角标需持续出现才认定插播广告，防误判
         private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
-        private const val RETRY_GAP_MS = 2500L            // 重试间隔
+        private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
+        private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
         private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
 
         // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
@@ -256,6 +261,7 @@ class AdSkipService : AccessibilityService() {
         var adChipText: String? = null      // 触发角标识别的原始文字（诊断用）
         var unlocked: Boolean = false
         var unlockText: String? = null      // 「上滑继续观看」类提示原文（诊断用）
+        var lockedToast: Boolean = false    // 红果提示「倒计时结束后即可滑动」（锁定期信号）
         var skipNode: AccessibilityNodeInfo? = null
     }
 
@@ -295,6 +301,11 @@ class AdSkipService : AccessibilityService() {
                 result.unlocked = true
                 result.unlockText = (text ?: desc)?.take(16)
             }
+            if (!result.lockedToast && (text?.contains(LOCKED_TOAST_REGEX) == true ||
+                        desc?.contains(LOCKED_TOAST_REGEX) == true)
+            ) {
+                result.lockedToast = true
+            }
             if (result.skipNode == null && (isSkipText(text) || isSkipText(desc))) {
                 result.skipNode = node.findClickableSelfOrParent()
             }
@@ -318,13 +329,26 @@ class AdSkipService : AccessibilityService() {
 
     private fun handleInTarget(found: ScanResult, now: Long) {
         val hasCountdown = found.countdownSec >= 0
-        val hasAd = hasCountdown || found.adChip || found.unlocked
+        val hasAd = hasCountdown || found.adChip || found.unlocked || found.lockedToast
 
         // 屏幕上既无倒计时也无「广告」角标：广告已结束（或本来就没有），复位
         if (!hasAd) {
             chipFirstSeenAt = 0L
             if (mode != Mode.IDLE) resetToIdle("广告已结束，恢复正常监测")
             publishState(State.MONITORING, -1)
+            return
+        }
+
+        // 红果提示「倒计时结束后即可滑动」= 仍在锁定期：
+        // 顺延重试而不是顶着提示硬滑，等倒计时真正结束再动
+        if (found.lockedToast) {
+            if (mode == Mode.IDLE) {
+                mode = Mode.FALLBACK
+                if (fallbackSinceAt == 0L) fallbackSinceAt = now
+                appendLog("红果提示仍在锁定期（倒计时结束后才可滑动），顺延自动上滑")
+            }
+            deadlineAt = now + LOCKED_BACKOFF_MS
+            publishAfterDecision(now)
             return
         }
 
