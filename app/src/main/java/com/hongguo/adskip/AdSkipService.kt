@@ -379,19 +379,17 @@ class AdSkipService : AccessibilityService() {
         }
         lastAdSeenAt = now
 
-        // 红果提示「倒计时结束后即可滑动」= 仍在锁定期：
-        // 顺延重试而不是顶着提示硬滑，等倒计时真正结束再动。
-        // 注意：倒计时进行中保持倒计时自己的精确计时，不被该提示覆盖
-        if (found.lockedToast && !(hasCountdown && mode == Mode.COUNTING)) {
+        // 红果提示「倒计时结束后即可滑动」= 仍在锁定期。
+        // 屏幕上还有倒计时文字时：说明倒计时正在走，忽略该提示、按倒计时正常等待；
+        // 没有倒计时文字时才把它当作退避信号，顺延而不是顶着提示硬滑
+        if (found.lockedToast && !hasCountdown) {
             if (mode == Mode.IDLE) {
                 mode = Mode.FALLBACK
                 if (fallbackSinceAt == 0L) fallbackSinceAt = now
                 appendLog("红果提示仍在锁定期（倒计时结束后才可滑动），顺延自动上滑")
             }
-            if (mode != Mode.COUNTING) {
-                deadlineAt = now + LOCKED_BACKOFF_MS
-                scheduleDeadlineKick(LOCKED_BACKOFF_MS)
-            }
+            deadlineAt = maxOf(deadlineAt, now + LOCKED_BACKOFF_MS)
+            scheduleDeadlineKick(deadlineAt - now)
             publishAfterDecision(now)
             return
         }
@@ -402,18 +400,9 @@ class AdSkipService : AccessibilityService() {
             return
         }
 
-        // 「上滑继续观看短剧」提示出现 = 已解锁、现在就能翻：
-        // 这是无倒计时广告最可靠的信号；若数字倒计时还没到点则仍按倒计时等待
-        if (found.unlocked && (!hasCountdown || now >= deadlineAt)) {
-            attemptSkip(null, "检测到「${found.unlockText ?: "上滑继续观看"}」提示")
-            publishAfterDecision(now)
-            return
-        }
-
-        // 「跳过」按钮：只在屏幕上没有倒计时文字时才点。
-        // 有倒计时的广告，倒计时进行中什么都不做
-        if (found.skipNode != null && !hasCountdown) {
-            attemptSkip(found.skipNode, "发现「跳过」按钮")
+        // 「跳过」按钮：屏幕上没有倒计时文字时才点（COUNTING 统一走倒计时结束路径）
+        if (mode != Mode.COUNTING && found.skipNode != null && !hasCountdown) {
+            attemptSkip(found.skipNode, "发现「跳过」按钮", countdownVisible = false)
             publishAfterDecision(now)
             return
         }
@@ -421,17 +410,18 @@ class AdSkipService : AccessibilityService() {
         when (mode) {
             Mode.IDLE -> {
                 if (hasCountdown) {
-                    mode = Mode.COUNTING
-                    deadlineAt = computeDeadline(now, found.countdownSec)
-                    // 硬超时兜底：即使提示文字卡死不动，最多再多等 15 秒也强制执行
-                    hardDeadlineAt = now + (found.countdownSec + 15) * 1000L +
-                            Prefs.getExtraDelayMs(this)
-                    lastCountdownSeenAt = now
-                    appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
+                    enterCounting(now, found)
                 } else if (found.adChip) {
-                    // 无倒计时的广告：角标需连续出现一小段时间才认定，防止瞬时文字误判
+                    // 无倒计时广告：以右上角「广告」角标为主要信号
                     if (chipFirstSeenAt == 0L) chipFirstSeenAt = now
-                    if (now - chipFirstSeenAt >= CHIP_CONFIRM_MS) {
+                    if (found.unlocked) {
+                        // 角标 + 「上滑继续观看」提示同时在场：最快路径，
+                        // 下一轮扫描（约350ms）确认后立即上滑
+                        mode = Mode.FALLBACK
+                        if (fallbackSinceAt == 0L) fallbackSinceAt = now
+                        deadlineAt = now
+                        appendLog("检测到广告角标+「${found.unlockText ?: "上滑继续观看"}」提示，准备立即上滑")
+                    } else if (now - chipFirstSeenAt >= CHIP_CONFIRM_MS) {
                         mode = Mode.FALLBACK
                         if (fallbackSinceAt == 0L) fallbackSinceAt = now
                         // 从角标首次出现时刻起算等待：设置 1 秒 ≈ 广告出现 1 秒后翻页
@@ -445,52 +435,67 @@ class AdSkipService : AccessibilityService() {
                         )
                     }
                 }
+                // 无角标、无倒计时时不动作：普通剧集页的滑动提示不是广告信号
             }
 
             Mode.COUNTING -> {
                 if (hasCountdown) {
+                    // 铁律：倒计时文字在屏幕上 = 只等待，绝不做任何动作
                     lastCountdownSeenAt = now
                     val candidate = computeDeadline(now, found.countdownSec)
                     if (now >= deadlineAt || candidate < deadlineAt) {
-                        // 到点但文字仍在 = 计时偏早，允许推迟；
-                        // 滑动前以屏幕上的最新倒计时为准，避免抢跑
+                        // 到点但文字仍在 = 计时偏早，以屏幕上的最新秒数顺延
                         deadlineAt = minOf(candidate, hardDeadlineAt)
+                        scheduleDeadlineKick(deadlineAt - now)
                     }
-                } else if (!found.adChip && now - lastCountdownSeenAt > AD_GONE_GRACE_MS) {
-                    // 倒计时和角标都不在且已消失超过 2 秒：多半是用户自己划走了
+                    if (now >= hardDeadlineAt) {
+                        // 文字疑似卡死不动：硬超时兜底（唯一允许文字仍在时动作的情况）
+                        attemptSkip(found.skipNode, "倒计时硬超时", countdownVisible = true)
+                    }
+                } else if (found.adChip || now - lastCountdownSeenAt <= AD_GONE_GRACE_MS) {
+                    // 倒计时文字已从屏幕消失 = 倒计时结束，按自身计时尽快上滑
+                    if (now >= deadlineAt) {
+                        attemptSkip(found.skipNode, "倒计时结束", countdownVisible = false)
+                    } else {
+                        scheduleDeadlineKick(deadlineAt - now)
+                    }
+                } else {
+                    // 倒计时和角标都不在且已超过宽限期：多半是用户自己划走了
                     resetToIdle("广告已消失，取消本次自动上滑")
-                }
-                if (mode == Mode.COUNTING && now >= deadlineAt) {
-                    if (!hasCountdown) {
-                        // 滑前校验通过：倒计时文字确实已从屏幕上消失
-                        attemptSkip(found.skipNode, "倒计时结束")
-                    } else if (now >= hardDeadlineAt) {
-                        // 文字疑似卡死，硬超时兜底
-                        attemptSkip(found.skipNode, "倒计时硬超时")
-                    }
-                    // 其余情况：deadline 已被推迟，继续等下一轮扫描
                 }
             }
 
             Mode.FALLBACK -> {
                 if (hasCountdown) {
-                    // 兜底等待期间来了个带倒计时的新广告：切回倒计时模式
-                    mode = Mode.COUNTING
-                    deadlineAt = computeDeadline(now, found.countdownSec)
-                    hardDeadlineAt = now + (found.countdownSec + 15) * 1000L +
-                            Prefs.getExtraDelayMs(this)
-                    lastCountdownSeenAt = now
-                    appendLog("广告出现倒计时 ${found.countdownSec}s，改为倒计时结束后上滑")
+                    // 兜底等待期间屏幕上出现了倒计时：切回倒计时模式，结束前不动作
+                    enterCounting(now, found)
                 } else if (now - fallbackSinceAt > FALLBACK_TOTAL_LIMIT_MS) {
                     resetToIdle("本波广告自动跳过超时（45s），已暂停，等广告自然结束")
+                } else if (found.unlocked) {
+                    // 无倒计时广告的解锁提示：立即上滑
+                    attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
                 } else if (now >= deadlineAt) {
-                    // 本次扫描确认角标仍在，才执行重试滑动
-                    attemptSkip(null, "广告等待超时，尝试上滑")
+                    // 本次扫描已确认无倒计时文字，才执行兜底上滑
+                    attemptSkip(found.skipNode, "广告等待超时，尝试上滑", countdownVisible = false)
                 }
             }
         }
 
         publishAfterDecision(now)
+    }
+
+    /** 进入倒计时等待；倒计时期间的任何翻页动作都被 attemptSkip 的总闸拒绝 */
+    private fun enterCounting(now: Long, found: ScanResult) {
+        val first = mode != Mode.COUNTING
+        mode = Mode.COUNTING
+        deadlineAt = computeDeadline(now, found.countdownSec)
+        // 硬超时兜底：即使提示文字卡死不动，最多再多等 15 秒也强制执行
+        hardDeadlineAt = now + (found.countdownSec + 15) * 1000L + Prefs.getExtraDelayMs(this)
+        lastCountdownSeenAt = now
+        scheduleDeadlineKick(deadlineAt - now)
+        if (first) {
+            appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
+        }
     }
 
     private fun publishAfterDecision(now: Long) {
@@ -525,11 +530,11 @@ class AdSkipService : AccessibilityService() {
      * 执行一次跳过尝试：优先点「跳过」按钮，否则上滑。
      * 成功与否下次扫描自见分晓：广告特征还在就由 FALLBACK 模式按 RETRY_GAP 重试。
      */
-    private fun attemptSkip(skipNode: AccessibilityNodeInfo?, reason: String) {
-        // 总闸（铁律）：有倒计时的广告，倒计时进行中绝不动作。
-        // 只有倒计时自己的结束（"倒计时结束"）和硬超时（"倒计时硬超时"）能通过
-        if (mode == Mode.COUNTING && !reason.startsWith("倒计时")) {
-            appendLog("倒计时进行中，已拒绝提前动作（$reason）")
+    private fun attemptSkip(skipNode: AccessibilityNodeInfo?, reason: String, countdownVisible: Boolean) {
+        // 总闸（铁律）：本轮扫描屏幕上还有倒计时文字时，除倒计时自己的
+        // 结束/硬超时外一律拒绝。任何路径都无法在倒计时结束前翻页或点击
+        if (countdownVisible && !reason.startsWith("倒计时")) {
+            appendLog("倒计时文字仍在屏幕上，已拒绝动作（$reason）")
             return
         }
         retryCount++
