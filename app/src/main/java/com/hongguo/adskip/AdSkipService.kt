@@ -3,6 +3,7 @@ package com.hongguo.adskip
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.Rect
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Handler
@@ -53,7 +54,7 @@ class AdSkipService : AccessibilityService() {
         private const val DEADLINE_BUFFER_MS = 350L       // 倒计时归零后等 UI 稳定
         private const val AFTER_SWIPE_COOLDOWN_MS = 2600L // 跳过尝试后的冷却
         private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
-        private const val CHIP_CONFIRM_MS = 1200L         // 「广告」角标需持续出现才认定插播广告，防误判
+        private const val CHIP_CONFIRM_MS = 2000L         // 「广告」角标需持续出现才认定插播广告，防误判
         private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
         private const val RETRY_GAP_MS = 2500L            // 重试间隔
 
@@ -205,11 +206,16 @@ class AdSkipService : AccessibilityService() {
 
     private class ScanResult {
         var countdownSec: Int = -1
+        var countdownText: String? = null   // 触发倒计时识别的原始文字（诊断用）
         var adChip: Boolean = false
+        var adChipText: String? = null      // 触发角标识别的原始文字（诊断用）
         var skipNode: AccessibilityNodeInfo? = null
     }
 
     private fun findAdSignature(root: AccessibilityNodeInfo, nodeLimit: Int): ScanResult {
+        val dm = resources.displayMetrics
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
         val result = ScanResult()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -221,11 +227,22 @@ class AdSkipService : AccessibilityService() {
             val desc = node.contentDescription?.toString()
 
             if (result.countdownSec < 0) {
-                if (text != null) result.countdownSec = matchCountdown(text)
-                if (result.countdownSec < 0 && desc != null) result.countdownSec = matchCountdown(desc)
+                if (text != null) {
+                    result.countdownSec = matchCountdown(text)
+                    if (result.countdownSec >= 0) result.countdownText = text.take(24)
+                }
+                if (result.countdownSec < 0 && desc != null) {
+                    result.countdownSec = matchCountdown(desc)
+                    if (result.countdownSec >= 0) result.countdownText = desc.take(24)
+                }
             }
             if (!result.adChip && (isAdLabel(text) || isAdLabel(desc))) {
-                result.adChip = true
+                // 只有屏幕右上角的「广告」角标才算插播广告；
+                // 首页推荐卡片、活动页中间的「广告」字样一律忽略，防止误判
+                if (isInAdChipCorner(node, screenW, screenH)) {
+                    result.adChip = true
+                    result.adChipText = (text ?: desc)?.take(16)
+                }
             }
             if (result.skipNode == null && (isSkipText(text) || isSkipText(desc))) {
                 result.skipNode = node.findClickableSelfOrParent()
@@ -235,6 +252,15 @@ class AdSkipService : AccessibilityService() {
             }
         }
         return result
+    }
+
+    /** 插播广告的「广告」角标固定在屏幕右上角区域（顶部 30%、右半屏） */
+    private fun isInAdChipCorner(node: AccessibilityNodeInfo, screenW: Int, screenH: Int): Boolean {
+        if (screenW <= 0 || screenH <= 0) return true
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        if (r.isEmpty) return false
+        return r.top <= screenH * 0.30f && r.left >= screenW * 0.50f
     }
 
     // ------------------------------------------------------------------ 广告决策
@@ -270,7 +296,7 @@ class AdSkipService : AccessibilityService() {
                     mode = Mode.COUNTING
                     deadlineAt = computeDeadline(now, found.countdownSec)
                     lastCountdownSeenAt = now
-                    appendLog("识别到广告，倒计时 ${found.countdownSec}s，结束后自动上滑")
+                    appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
                 } else if (found.adChip) {
                     // 无倒计时的广告：角标需持续出现一小段时间才认定，防止瞬时文字误判
                     if (chipFirstSeenAt == 0L) chipFirstSeenAt = now
@@ -278,7 +304,10 @@ class AdSkipService : AccessibilityService() {
                         mode = Mode.FALLBACK
                         val waitMs = Prefs.getFallbackWaitMs(this)
                         deadlineAt = now + waitMs
-                        appendLog("检测到广告（无倒计时），${waitMs / 1000}s 后开始尝试上滑")
+                        appendLog(
+                            "检测到广告角标「${found.adChipText ?: "广告"}」（右上角，无倒计时），" +
+                                    "${waitMs / 1000}s 后尝试上滑"
+                        )
                     }
                 }
             }
