@@ -72,6 +72,7 @@ class AdSkipService : AccessibilityService() {
         private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
         private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
+        private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
         private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
 
         // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
@@ -116,6 +117,7 @@ class AdSkipService : AccessibilityService() {
     private var lastCountdownSeenAt = 0L
     private var cooldownUntil = 0L
     private var chipFirstSeenAt = 0L       // 「广告」角标首次出现时间（连续出现判定用）
+    private var lastAdSeenAt = 0L          // 最近一次见到广告特征的时间（闪断宽限判定用）
     private var fallbackSinceAt = 0L       // 本波广告兜底流程的开始时间（总时长上限用）
     private var retryCount = 0             // 当前这波广告已尝试次数
     private var probeTick = 0
@@ -137,6 +139,11 @@ class AdSkipService : AccessibilityService() {
             scanOnce()
         } catch (_: Exception) {
         }
+    }
+
+    /** 到点即时触发一次扫描，消除轮询相位带来的额外等待 */
+    private fun scheduleDeadlineKick(delayMs: Long) {
+        if (delayMs > 50) mainHandler.postDelayed(kicker, delayMs)
     }
 
     override fun onServiceConnected() {
@@ -358,10 +365,19 @@ class AdSkipService : AccessibilityService() {
         // 屏幕上既无倒计时也无「广告」角标：广告已结束（或本来就没有），复位
         if (!hasAd) {
             chipFirstSeenAt = 0L
-            if (mode != Mode.IDLE) resetToIdle("广告已结束，恢复正常监测")
+            if (mode != Mode.IDLE) {
+                if (now - lastAdSeenAt <= AD_BLINK_GRACE_MS) {
+                    // 特征刚消失不足 0.8 秒：多半是界面重绘导致的闪断，
+                    // 维持原计时宽限等待，避免重新确认 + 重新等待多花近 2 秒
+                    publishState(if (mode == Mode.COUNTING) State.AD_COUNTDOWN else State.AD_FALLBACK, -1)
+                    return
+                }
+                resetToIdle("广告已结束，恢复正常监测")
+            }
             publishState(State.MONITORING, -1)
             return
         }
+        lastAdSeenAt = now
 
         // 红果提示「倒计时结束后即可滑动」= 仍在锁定期：
         // 顺延重试而不是顶着提示硬滑，等倒计时真正结束再动
@@ -372,6 +388,7 @@ class AdSkipService : AccessibilityService() {
                 appendLog("红果提示仍在锁定期（倒计时结束后才可滑动），顺延自动上滑")
             }
             deadlineAt = now + LOCKED_BACKOFF_MS
+            scheduleDeadlineKick(LOCKED_BACKOFF_MS)
             publishAfterDecision(now)
             return
         }
@@ -406,6 +423,7 @@ class AdSkipService : AccessibilityService() {
                     hardDeadlineAt = now + (found.countdownSec + 15) * 1000L +
                             Prefs.getExtraDelayMs(this)
                     lastCountdownSeenAt = now
+                    scheduleDeadlineKick(deadlineAt - now)
                     appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
                 } else if (found.adChip) {
                     // 无倒计时的广告：角标需连续出现一小段时间才认定，防止瞬时文字误判
@@ -417,6 +435,7 @@ class AdSkipService : AccessibilityService() {
                         val waitMs = Prefs.getFallbackWaitMs(this)
                         deadlineAt = chipFirstSeenAt + waitMs
                         if (deadlineAt <= now) deadlineAt = now + 200L
+                        scheduleDeadlineKick(deadlineAt - now)
                         appendLog(
                             "检测到广告角标「${found.adChipText ?: "广告"}」（右上角，无倒计时），" +
                                     "${waitMs / 1000}s 后尝试上滑"
@@ -433,6 +452,7 @@ class AdSkipService : AccessibilityService() {
                         // 到点但文字仍在 = 计时偏早，允许推迟；
                         // 滑动前以屏幕上的最新倒计时为准，避免抢跑
                         deadlineAt = minOf(candidate, hardDeadlineAt)
+                        scheduleDeadlineKick(deadlineAt - now)
                     }
                 } else if (!found.adChip && now - lastCountdownSeenAt > AD_GONE_GRACE_MS) {
                     // 倒计时和角标都不在且已消失超过 2 秒：多半是用户自己划走了
@@ -531,6 +551,7 @@ class AdSkipService : AccessibilityService() {
             fallbackSinceAt = SystemClock.elapsedRealtime()
         }
         deadlineAt = SystemClock.elapsedRealtime() + RETRY_GAP_MS
+        scheduleDeadlineKick(RETRY_GAP_MS)
         val n = skipCount.value + 1
         skipCount.value = n
         Prefs.setSkipCount(this, n)
