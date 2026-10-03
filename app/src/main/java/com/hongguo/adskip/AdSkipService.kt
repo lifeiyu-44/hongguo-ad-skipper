@@ -45,11 +45,18 @@ class AdSkipService : AccessibilityService() {
         /** 「跳过 5」这类带倒数数字的跳过按钮：数字未归零前不可用，不点击 */
         val SKIP_WITH_COUNTDOWN_REGEX = Regex("""跳过\s*\d+""")
 
+        /**
+         * 「上滑继续观看短剧」「上滑观看下一集」等无数字的解锁提示：
+         * 红果在广告可跳过时显示，出现即说明现在就能上滑（无倒计时广告的可靠信号）。
+         * 注意不匹配「上滑查看详情」——那是进商城的，不能滑。
+         */
+        val UNLOCK_HINT_REGEX = Regex("""上滑[^0-9]{0,8}?(继续|观看|进入|下一集)""")
+
         private const val AD_LABEL = "广告"
 
         // ---- 扫描节奏 ----
         private const val POLL_INTERVAL_MS = 350L
-        private const val FULL_NODE_LIMIT = 900      // 目标应用内全量扫描的节点上限
+        private const val WINDOW_NODE_LIMIT = 600   // 每个窗口扫描的节点上限（多窗口合并）
         private const val PROBE_NODE_LIMIT = 260     // 非目标应用的轻量探测上限
         private const val PROBE_EVERY_N_TICKS = 3    // 非目标应用降低探测频率
 
@@ -207,7 +214,39 @@ class AdSkipService : AccessibilityService() {
             return
         }
 
-        handleInTarget(findAdSignature(root, FULL_NODE_LIMIT), now)
+        // 广告可能渲染在独立窗口（浮层）里，遍历目标应用的所有窗口一起扫描
+        handleInTarget(scanAllWindows(), now)
+    }
+
+    /** 合并扫描目标应用的所有窗口：rootInActiveWindow 不一定包含广告浮层所在的窗口 */
+    private fun scanAllWindows(): ScanResult {
+        val merged = ScanResult()
+        val roots = ArrayList<AccessibilityNodeInfo>()
+        try {
+            for (w in windows) {
+                val r = w.root ?: continue
+                if (r.packageName?.toString() in Prefs.getTargetPackages(this)) roots.add(r)
+            }
+        } catch (_: Exception) {
+        }
+        if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
+        for (r in roots) {
+            val f = findAdSignature(r, WINDOW_NODE_LIMIT)
+            if (merged.countdownSec < 0) {
+                merged.countdownSec = f.countdownSec
+                merged.countdownText = f.countdownText
+            }
+            if (!merged.adChip && f.adChip) {
+                merged.adChip = true
+                merged.adChipText = f.adChipText
+            }
+            if (!merged.unlocked && f.unlocked) {
+                merged.unlocked = true
+                merged.unlockText = f.unlockText
+            }
+            if (merged.skipNode == null) merged.skipNode = f.skipNode
+        }
+        return merged
     }
 
     private class ScanResult {
@@ -215,6 +254,8 @@ class AdSkipService : AccessibilityService() {
         var countdownText: String? = null   // 触发倒计时识别的原始文字（诊断用）
         var adChip: Boolean = false
         var adChipText: String? = null      // 触发角标识别的原始文字（诊断用）
+        var unlocked: Boolean = false
+        var unlockText: String? = null      // 「上滑继续观看」类提示原文（诊断用）
         var skipNode: AccessibilityNodeInfo? = null
     }
 
@@ -250,6 +291,10 @@ class AdSkipService : AccessibilityService() {
                     result.adChipText = (text ?: desc)?.take(16)
                 }
             }
+            if (!result.unlocked && (isUnlockHint(text) || isUnlockHint(desc))) {
+                result.unlocked = true
+                result.unlockText = (text ?: desc)?.take(16)
+            }
             if (result.skipNode == null && (isSkipText(text) || isSkipText(desc))) {
                 result.skipNode = node.findClickableSelfOrParent()
             }
@@ -273,7 +318,7 @@ class AdSkipService : AccessibilityService() {
 
     private fun handleInTarget(found: ScanResult, now: Long) {
         val hasCountdown = found.countdownSec >= 0
-        val hasAd = hasCountdown || found.adChip
+        val hasAd = hasCountdown || found.adChip || found.unlocked
 
         // 屏幕上既无倒计时也无「广告」角标：广告已结束（或本来就没有），复位
         if (!hasAd) {
@@ -286,6 +331,14 @@ class AdSkipService : AccessibilityService() {
         // 这波广告尝试太多次仍未翻过去：放弃，等广告自然结束，避免反复滑动干扰
         if (retryCount >= MAX_ATTEMPTS) {
             publishState(if (mode == Mode.COUNTING) State.AD_COUNTDOWN else State.AD_FALLBACK, -1)
+            return
+        }
+
+        // 「上滑继续观看短剧」提示出现 = 已解锁、现在就能翻：
+        // 这是无倒计时广告最可靠的信号；若数字倒计时还没到点则仍按倒计时等待
+        if (found.unlocked && (!hasCountdown || now >= deadlineAt)) {
+            attemptSkip(null, "检测到「${found.unlockText ?: "上滑继续观看"}」提示")
+            publishAfterDecision(now)
             return
         }
 
@@ -489,6 +542,11 @@ class AdSkipService : AccessibilityService() {
         if (s == null || !s.contains("跳过") || s.length > 12) return false
         // 「跳过 5」这类带倒数数字的按钮尚未可用：不点，等数字归零变成纯「跳过」再点
         return !SKIP_WITH_COUNTDOWN_REGEX.containsMatchIn(s)
+    }
+
+    private fun isUnlockHint(s: String?): Boolean {
+        if (s == null || s.length > 20) return false
+        return UNLOCK_HINT_REGEX.containsMatchIn(s)
     }
 
     private fun AccessibilityNodeInfo.findClickableSelfOrParent(): AccessibilityNodeInfo? {
