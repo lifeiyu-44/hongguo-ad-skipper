@@ -42,6 +42,9 @@ class AdSkipService : AccessibilityService() {
         /** 「广告」角标上带单位的剩余秒数（备用特征），如「广告 15s」 */
         val CHIP_COUNTDOWN_REGEX = Regex("""广告\s*(\d{1,3})\s*[sS秒](?![a-zA-Z])""")
 
+        /** 「跳过 5」这类带倒数数字的跳过按钮：数字未归零前不可用，不点击 */
+        val SKIP_WITH_COUNTDOWN_REGEX = Regex("""跳过\s*\d+""")
+
         private const val AD_LABEL = "广告"
 
         // ---- 扫描节奏 ----
@@ -57,6 +60,7 @@ class AdSkipService : AccessibilityService() {
         private const val CHIP_CONFIRM_MS = 2000L         // 「广告」角标需持续出现才认定插播广告，防误判
         private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
         private const val RETRY_GAP_MS = 2500L            // 重试间隔
+        private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
 
         // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
         // 距离拉到约 6 成屏高、速度加快，保证位移过半必翻页；翻不动由重试兜底
@@ -96,9 +100,11 @@ class AdSkipService : AccessibilityService() {
 
     private var mode = Mode.IDLE
     private var deadlineAt = 0L            // elapsedRealtime 时刻的下次动作时间
+    private var hardDeadlineAt = 0L        // 倒计时的硬超时点：文字卡死不动时兜底强制滑动
     private var lastCountdownSeenAt = 0L
     private var cooldownUntil = 0L
     private var chipFirstSeenAt = 0L       // 「广告」角标首次出现时间（连续出现判定用）
+    private var fallbackSinceAt = 0L       // 本波广告兜底流程的开始时间（总时长上限用）
     private var retryCount = 0             // 当前这波广告已尝试次数
     private var probeTick = 0
     private var offlineLogged = false      // 断网提示只记一次，避免日志刷屏
@@ -295,6 +301,9 @@ class AdSkipService : AccessibilityService() {
                 if (hasCountdown) {
                     mode = Mode.COUNTING
                     deadlineAt = computeDeadline(now, found.countdownSec)
+                    // 硬超时兜底：即使提示文字卡死不动，最多再多等 15 秒也强制执行
+                    hardDeadlineAt = now + (found.countdownSec + 15) * 1000L +
+                            Prefs.getExtraDelayMs(this)
                     lastCountdownSeenAt = now
                     appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
                 } else if (found.adChip) {
@@ -302,6 +311,7 @@ class AdSkipService : AccessibilityService() {
                     if (chipFirstSeenAt == 0L) chipFirstSeenAt = now
                     if (now - chipFirstSeenAt >= CHIP_CONFIRM_MS) {
                         mode = Mode.FALLBACK
+                        if (fallbackSinceAt == 0L) fallbackSinceAt = now
                         val waitMs = Prefs.getFallbackWaitMs(this)
                         deadlineAt = now + waitMs
                         appendLog(
@@ -315,16 +325,25 @@ class AdSkipService : AccessibilityService() {
             Mode.COUNTING -> {
                 if (hasCountdown) {
                     lastCountdownSeenAt = now
-                    // 按屏幕上的最新秒数不断校正截止时间，防止计时漂移
                     val candidate = computeDeadline(now, found.countdownSec)
-                    if (candidate < deadlineAt) deadlineAt = candidate
+                    if (now >= deadlineAt || candidate < deadlineAt) {
+                        // 到点但文字仍在 = 计时偏早，允许推迟；
+                        // 滑动前以屏幕上的最新倒计时为准，避免抢跑
+                        deadlineAt = minOf(candidate, hardDeadlineAt)
+                    }
                 } else if (!found.adChip && now - lastCountdownSeenAt > AD_GONE_GRACE_MS) {
                     // 倒计时和角标都不在且已消失超过 2 秒：多半是用户自己划走了
                     resetToIdle("广告已消失，取消本次自动上滑")
                 }
-                // 其余情况（倒计时在 / 角标在 / 刚消失不久）：等截止时间到点执行跳过
                 if (mode == Mode.COUNTING && now >= deadlineAt) {
-                    attemptSkip(found.skipNode, "倒计时结束")
+                    if (!hasCountdown) {
+                        // 滑前校验通过：倒计时文字确实已从屏幕上消失
+                        attemptSkip(found.skipNode, "倒计时结束")
+                    } else if (now >= hardDeadlineAt) {
+                        // 文字疑似卡死，硬超时兜底
+                        attemptSkip(found.skipNode, "倒计时硬超时")
+                    }
+                    // 其余情况：deadline 已被推迟，继续等下一轮扫描
                 }
             }
 
@@ -333,9 +352,14 @@ class AdSkipService : AccessibilityService() {
                     // 兜底等待期间来了个带倒计时的新广告：切回倒计时模式
                     mode = Mode.COUNTING
                     deadlineAt = computeDeadline(now, found.countdownSec)
+                    hardDeadlineAt = now + (found.countdownSec + 15) * 1000L +
+                            Prefs.getExtraDelayMs(this)
                     lastCountdownSeenAt = now
                     appendLog("广告出现倒计时 ${found.countdownSec}s，改为倒计时结束后上滑")
+                } else if (now - fallbackSinceAt > FALLBACK_TOTAL_LIMIT_MS) {
+                    resetToIdle("本波广告自动跳过超时（45s），已暂停，等广告自然结束")
                 } else if (now >= deadlineAt) {
+                    // 本次扫描确认角标仍在，才执行重试滑动
                     attemptSkip(null, "广告等待超时，尝试上滑")
                 }
             }
@@ -398,8 +422,11 @@ class AdSkipService : AccessibilityService() {
             appendLog("连续 ${MAX_ATTEMPTS} 次仍未翻过广告，暂停尝试，等广告自然结束")
         }
 
-        // 无论点还是滑，之后都进入 FALLBACK 节奏：广告角标若还在，隔 RETRY_GAP 再试
+        // 无论点还是滑，之后都进入 FALLBACK 节奏：广告特征若还在，隔 RETRY_GAP 再试
         mode = Mode.FALLBACK
+        if (fallbackSinceAt == 0L) {
+            fallbackSinceAt = SystemClock.elapsedRealtime()
+        }
         deadlineAt = SystemClock.elapsedRealtime() + RETRY_GAP_MS
         val n = skipCount.value + 1
         skipCount.value = n
@@ -439,6 +466,8 @@ class AdSkipService : AccessibilityService() {
         if (msg != null) appendLog(msg)
         mode = Mode.IDLE
         deadlineAt = 0L
+        hardDeadlineAt = 0L
+        fallbackSinceAt = 0L
         retryCount = 0
         chipFirstSeenAt = 0L
     }
@@ -456,8 +485,11 @@ class AdSkipService : AccessibilityService() {
         return s == AD_LABEL || (s.startsWith(AD_LABEL) && s.length <= AD_LABEL.length + 6)
     }
 
-    private fun isSkipText(s: String?): Boolean =
-        s != null && s.contains("跳过") && s.length <= 12
+    private fun isSkipText(s: String?): Boolean {
+        if (s == null || !s.contains("跳过") || s.length > 12) return false
+        // 「跳过 5」这类带倒数数字的按钮尚未可用：不点，等数字归零变成纯「跳过」再点
+        return !SKIP_WITH_COUNTDOWN_REGEX.containsMatchIn(s)
+    }
 
     private fun AccessibilityNodeInfo.findClickableSelfOrParent(): AccessibilityNodeInfo? {
         var n: AccessibilityNodeInfo? = this

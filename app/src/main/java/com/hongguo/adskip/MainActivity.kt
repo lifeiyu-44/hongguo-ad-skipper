@@ -57,8 +57,8 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        fallbackBar.max = 25000 // 3s ~ 28s
-        fallbackBar.progress = (Prefs.getFallbackWaitMs(this) - 3000).coerceIn(0, 25000)
+        fallbackBar.max = 27000 // 1s ~ 28s
+        fallbackBar.progress = (Prefs.getFallbackWaitMs(this) - 1000).coerceIn(0, 27000)
         fallbackLabel.text = getString(R.string.fallback_value, Prefs.getFallbackWaitMs(this) / 1000)
         fallbackBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, value: Int, fromUser: Boolean) {
@@ -145,7 +145,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun snapDelay(value: Int): Int = (value / 50) * 50
 
-    private fun snapFallbackSec(progress: Int): Int = ((progress + 3000) / 1000).coerceIn(3, 28)
+    private fun snapFallbackSec(progress: Int): Int = ((progress + 1000) / 1000).coerceIn(1, 28)
 
     private fun refreshTargetsText(tv: TextView) {
         val pkgs = Prefs.getTargetPackages(this).sorted().joinToString("、")
