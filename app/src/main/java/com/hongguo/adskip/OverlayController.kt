@@ -1,7 +1,6 @@
 package com.hongguo.adskip
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -46,13 +45,14 @@ object OverlayController {
 
     private fun attach(app: Context) {
         val windowManager = app.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        // 刻意做得很小很透明：只在有广告时短暂出现，尽量不干扰画面
         val view = TextView(app).apply {
-            setTextColor(Color.WHITE)
-            textSize = 13f
-            setPadding(dp(app, 14), dp(app, 7), dp(app, 14), dp(app, 7))
+            setTextColor(0xB3FFFFFF.toInt())
+            textSize = 11f
+            setPadding(dp(app, 9), dp(app, 4), dp(app, 9), dp(app, 4))
             background = GradientDrawable().apply {
-                cornerRadius = dp(app, 18).toFloat()
-                setColor(0xCC222222.toInt())
+                cornerRadius = dp(app, 12).toFloat()
+                setColor(0x66222222)
             }
         }
         val params = WindowManager.LayoutParams().apply {

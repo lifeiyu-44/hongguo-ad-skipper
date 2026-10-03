@@ -13,6 +13,7 @@ object Prefs {
     private const val KEY_AUTO = "auto_swipe"
     private const val KEY_OVERLAY = "overlay_status"
     private const val KEY_DELAY = "extra_delay_ms"
+    private const val KEY_FALLBACK = "fallback_wait_ms"
     private const val KEY_COUNT = "skip_count"
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -36,6 +37,11 @@ object Prefs {
     fun getExtraDelayMs(ctx: Context) = sp(ctx).getInt(KEY_DELAY, 250)
 
     fun setExtraDelayMs(ctx: Context, v: Int) = sp(ctx).edit().putInt(KEY_DELAY, v).apply()
+
+    /** 无倒计时广告的兜底等待时长（毫秒），到点后开始尝试上滑 */
+    fun getFallbackWaitMs(ctx: Context) = sp(ctx).getInt(KEY_FALLBACK, 10000)
+
+    fun setFallbackWaitMs(ctx: Context, v: Int) = sp(ctx).edit().putInt(KEY_FALLBACK, v).apply()
 
     fun getSkipCount(ctx: Context) = sp(ctx).getInt(KEY_COUNT, 0)
 

@@ -34,6 +34,8 @@ class MainActivity : AppCompatActivity() {
         val switchOverlay = findViewById<MaterialSwitch>(R.id.switchOverlay)
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
         val delayLabel = findViewById<TextView>(R.id.delayLabel)
+        val fallbackBar = findViewById<SeekBar>(R.id.fallbackBar)
+        val fallbackLabel = findViewById<TextView>(R.id.fallbackLabel)
         val targetsText = findViewById<TextView>(R.id.targetsText)
         val logView = findViewById<TextView>(R.id.logView)
         val btnClearLog = findViewById<Button>(R.id.btnClearLog)
@@ -63,6 +65,23 @@ class MainActivity : AppCompatActivity() {
                 val v = snapDelay(sb?.progress ?: 0)
                 Prefs.setExtraDelayMs(this@MainActivity, v)
                 delayLabel.text = getString(R.string.delay_value, v)
+            }
+        })
+
+        fallbackBar.max = 25000 // 3s ~ 28s
+        fallbackBar.progress = (Prefs.getFallbackWaitMs(this) - 3000).coerceIn(0, 25000)
+        fallbackLabel.text = getString(R.string.fallback_value, Prefs.getFallbackWaitMs(this) / 1000)
+        fallbackBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, value: Int, fromUser: Boolean) {
+                fallbackLabel.text = getString(R.string.fallback_value, snapFallbackSec(value))
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                val v = snapFallbackSec(sb?.progress ?: 0) * 1000
+                Prefs.setFallbackWaitMs(this@MainActivity, v)
+                fallbackLabel.text = getString(R.string.fallback_value, v / 1000)
             }
         })
 
@@ -103,6 +122,7 @@ class MainActivity : AppCompatActivity() {
                     AdSkipService.state.collect { st ->
                         when (st) {
                             AdSkipService.State.MONITORING -> stateText.setText(R.string.state_monitoring)
+                            AdSkipService.State.AD_FALLBACK -> stateText.setText(R.string.state_fallback)
                             AdSkipService.State.IDLE -> stateText.setText(R.string.state_idle)
                             // 倒计时秒数由 countdownRemain 渲染
                             AdSkipService.State.AD_COUNTDOWN -> Unit
@@ -137,6 +157,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun snapDelay(value: Int): Int = (value / 50) * 50
+
+    private fun snapFallbackSec(progress: Int): Int = ((progress + 3000) / 1000).coerceIn(3, 28)
 
     private fun refreshOverlayPermissionButton(btn: Button) {
         btn.visibility = if (Settings.canDrawOverlays(this)) View.GONE else View.VISIBLE

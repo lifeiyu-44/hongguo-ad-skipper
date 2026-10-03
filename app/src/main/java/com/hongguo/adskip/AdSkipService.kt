@@ -16,14 +16,17 @@ import java.util.Locale
 /**
  * 核心无障碍服务，工作流程：
  * 1. 定时检查前台窗口，判断是否为目标 App（红果短剧，包名 com.phoenix.read）
- * 2. 遍历视图树，查找广告特征文字：「广告」角标 + 「N秒后可继续上滑观看短剧」倒计时
- * 3. 记录倒计时截止时间；倒计时归零后模拟一次上滑手势，进入下一集
+ * 2. 遍历视图树读取屏幕文字，识别三类广告特征：
+ *    - 「N秒后可继续上滑观看短剧」倒计时提示（主特征）
+ *    - 右上角「广告」角标（含无倒计时的广告，走兜底等待后上滑）
+ *    - 「跳过」按钮（出现即点击）
+ * 3. 倒计时归零 / 兜底等待到点后，模拟上滑手势进入下一集；翻页失败自动重试
  *
- * 所有识别基于无障碍节点文字，在本机完成，不联网。
+ * 识别基于无障碍节点文字，在本机完成，不联网。
  */
 class AdSkipService : AccessibilityService() {
 
-    enum class State { IDLE, MONITORING, AD_COUNTDOWN }
+    enum class State { IDLE, MONITORING, AD_COUNTDOWN, AD_FALLBACK }
 
     companion object {
         /**
@@ -45,15 +48,19 @@ class AdSkipService : AccessibilityService() {
 
         // ---- 跳过时机 ----
         private const val DEADLINE_BUFFER_MS = 350L       // 倒计时归零后等 UI 稳定
-        private const val AFTER_SWIPE_COOLDOWN_MS = 2600L // 上滑后的冷却，防止连续误触
-        private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久后视为广告已不在
+        private const val AFTER_SWIPE_COOLDOWN_MS = 2600L // 跳过尝试后的冷却
+        private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
+        private const val CHIP_CONFIRM_MS = 1200L         // 「广告」角标需持续出现才认定插播广告，防误判
+        private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
+        private const val RETRY_GAP_MS = 2500L            // 重试间隔
 
-        // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用） ----
-        private const val SWIPE_DURATION_MS = 300L
-        private const val SWIPE_START_FRACTION_PORTRAIT = 0.74f
-        private const val SWIPE_END_FRACTION_PORTRAIT = 0.30f
-        private const val SWIPE_START_FRACTION_LANDSCAPE = 0.76f
-        private const val SWIPE_END_FRACTION_LANDSCAPE = 0.38f
+        // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
+        // 距离拉到约 6 成屏高、速度加快，保证位移过半必翻页；翻不动由重试兜底
+        private const val SWIPE_DURATION_MS = 220L
+        private const val SWIPE_START_FRACTION_PORTRAIT = 0.80f
+        private const val SWIPE_END_FRACTION_PORTRAIT = 0.16f
+        private const val SWIPE_START_FRACTION_LANDSCAPE = 0.78f
+        private const val SWIPE_END_FRACTION_LANDSCAPE = 0.18f
 
         // ---- 供 UI 订阅的状态 ----
         val running = MutableStateFlow(false)
@@ -77,15 +84,18 @@ class AdSkipService : AccessibilityService() {
         }
     }
 
-    private enum class Mode { IDLE, COUNTING }
+    /** IDLE=无广告 COUNTING=倒计时中 FALLBACK=有「广告」角标但无倒计时（兜底等待/重试） */
+    private enum class Mode { IDLE, COUNTING, FALLBACK }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tsFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     private var mode = Mode.IDLE
-    private var deadlineAt = 0L            // elapsedRealtime 时刻的上滑截止点
+    private var deadlineAt = 0L            // elapsedRealtime 时刻的下次动作时间
     private var lastCountdownSeenAt = 0L
     private var cooldownUntil = 0L
+    private var chipFirstSeenAt = 0L       // 「广告」角标首次出现时间（连续出现判定用）
+    private var retryCount = 0             // 当前这波广告已尝试次数
     private var probeTick = 0
 
     private val ticker = object : Runnable {
@@ -161,8 +171,8 @@ class AdSkipService : AccessibilityService() {
         }
 
         if (now < cooldownUntil) {
-            // 刚执行过上滑，给界面切换留时间
-            publishState(State.MONITORING, -1)
+            // 刚执行过跳过动作，给界面切换留时间
+            publishState(if (mode == Mode.COUNTING) State.AD_COUNTDOWN else State.MONITORING, -1)
             return
         }
 
@@ -203,41 +213,106 @@ class AdSkipService : AccessibilityService() {
         return result
     }
 
+    // ------------------------------------------------------------------ 广告决策
+
     private fun handleInTarget(found: ScanResult, now: Long) {
-        if (mode == Mode.IDLE) {
-            if (found.countdownSec >= 0) {
-                mode = Mode.COUNTING
-                deadlineAt = now + found.countdownSec * 1000L +
-                        Prefs.getExtraDelayMs(this) + DEADLINE_BUFFER_MS
-                lastCountdownSeenAt = now
-                appendLog("识别到广告，倒计时 ${found.countdownSec}s，结束后自动上滑")
-            }
-        } else {
-            if (found.countdownSec >= 0) {
-                lastCountdownSeenAt = now
-                // 按屏幕上的最新秒数不断校正截止时间，防止计时漂移
-                val candidate = now + found.countdownSec * 1000L +
-                        Prefs.getExtraDelayMs(this) + DEADLINE_BUFFER_MS
-                if (candidate < deadlineAt) deadlineAt = candidate
-            } else if (now - lastCountdownSeenAt > AD_GONE_GRACE_MS && now < deadlineAt) {
-                // 倒计时文字消失且广告角标也不在，多半是用户自己划走了
-                resetToIdle("广告已消失，取消本次自动上滑")
-            }
+        val hasCountdown = found.countdownSec >= 0
+        val hasAd = hasCountdown || found.adChip
 
-            if (mode == Mode.COUNTING && now >= deadlineAt) {
-                performSkip(found.skipNode)
-            }
-        }
-
-        if (mode == Mode.COUNTING) {
-            val remain = ((deadlineAt - now) / 1000L).toInt() + 1
-            publishState(State.AD_COUNTDOWN, remain)
-            OverlayController.update(this, "广告倒计时 ${remain}s，将自动上滑")
-        } else {
+        // 屏幕上既无倒计时也无「广告」角标：广告已结束（或本来就没有），复位
+        if (!hasAd) {
+            chipFirstSeenAt = 0L
+            if (mode != Mode.IDLE) resetToIdle("广告已结束，恢复正常监测")
             publishState(State.MONITORING, -1)
             OverlayController.update(this, null)
+            return
+        }
+
+        // 这波广告尝试太多次仍未翻过去：放弃，等广告自然结束，避免反复滑动干扰
+        if (retryCount >= MAX_ATTEMPTS) {
+            publishState(if (mode == Mode.COUNTING) State.AD_COUNTDOWN else State.AD_FALLBACK, -1)
+            return
+        }
+
+        // 「跳过」按钮出现即点击，不等倒计时（很多无倒计时广告带跳过按钮）
+        if (found.skipNode != null) {
+            attemptSkip(found.skipNode, "发现「跳过」按钮")
+            publishAfterDecision(now)
+            return
+        }
+
+        when (mode) {
+            Mode.IDLE -> {
+                if (hasCountdown) {
+                    mode = Mode.COUNTING
+                    deadlineAt = computeDeadline(now, found.countdownSec)
+                    lastCountdownSeenAt = now
+                    appendLog("识别到广告，倒计时 ${found.countdownSec}s，结束后自动上滑")
+                } else if (found.adChip) {
+                    // 无倒计时的广告：角标需持续出现一小段时间才认定，防止瞬时文字误判
+                    if (chipFirstSeenAt == 0L) chipFirstSeenAt = now
+                    if (now - chipFirstSeenAt >= CHIP_CONFIRM_MS) {
+                        mode = Mode.FALLBACK
+                        val waitMs = Prefs.getFallbackWaitMs(this)
+                        deadlineAt = now + waitMs
+                        appendLog("检测到广告（无倒计时），${waitMs / 1000}s 后开始尝试上滑")
+                    }
+                }
+            }
+
+            Mode.COUNTING -> {
+                if (hasCountdown) {
+                    lastCountdownSeenAt = now
+                    // 按屏幕上的最新秒数不断校正截止时间，防止计时漂移
+                    val candidate = computeDeadline(now, found.countdownSec)
+                    if (candidate < deadlineAt) deadlineAt = candidate
+                } else if (!found.adChip && now - lastCountdownSeenAt > AD_GONE_GRACE_MS) {
+                    // 倒计时和角标都不在且已消失超过 2 秒：多半是用户自己划走了
+                    resetToIdle("广告已消失，取消本次自动上滑")
+                }
+                // 其余情况（倒计时在 / 角标在 / 刚消失不久）：等截止时间到点执行跳过
+                if (mode == Mode.COUNTING && now >= deadlineAt) {
+                    attemptSkip(found.skipNode, "倒计时结束")
+                }
+            }
+
+            Mode.FALLBACK -> {
+                if (hasCountdown) {
+                    // 兜底等待期间来了个带倒计时的新广告：切回倒计时模式
+                    mode = Mode.COUNTING
+                    deadlineAt = computeDeadline(now, found.countdownSec)
+                    lastCountdownSeenAt = now
+                    appendLog("广告出现倒计时 ${found.countdownSec}s，改为倒计时结束后上滑")
+                } else if (now >= deadlineAt) {
+                    attemptSkip(null, "广告等待超时，尝试上滑")
+                }
+            }
+        }
+
+        publishAfterDecision(now)
+    }
+
+    private fun publishAfterDecision(now: Long) {
+        when (mode) {
+            Mode.COUNTING -> {
+                val remain = ((deadlineAt - now) / 1000L).toInt() + 1
+                publishState(State.AD_COUNTDOWN, remain)
+                // 悬浮窗只显示一个极小的秒数，详细状态看 App 日志页
+                OverlayController.update(this, "${remain}s")
+            }
+            Mode.FALLBACK -> {
+                publishState(State.AD_FALLBACK, -1)
+                OverlayController.update(this, "•")
+            }
+            Mode.IDLE -> {
+                publishState(State.MONITORING, -1)
+                OverlayController.update(this, null)
+            }
         }
     }
+
+    private fun computeDeadline(now: Long, sec: Int): Long =
+        now + sec * 1000L + Prefs.getExtraDelayMs(this) + DEADLINE_BUFFER_MS
 
     private fun probeUnknownApp(root: AccessibilityNodeInfo, pkg: String) {
         val found = findAdSignature(root, PROBE_NODE_LIMIT)
@@ -249,9 +324,12 @@ class AdSkipService : AccessibilityService() {
 
     // ------------------------------------------------------------------ 执行跳过
 
-    private fun performSkip(skipNode: AccessibilityNodeInfo?) {
-        mode = Mode.IDLE
-        deadlineAt = 0L
+    /**
+     * 执行一次跳过尝试：优先点「跳过」按钮，否则上滑。
+     * 成功与否下次扫描自见分晓：广告特征还在就由 FALLBACK 模式按 RETRY_GAP 重试。
+     */
+    private fun attemptSkip(skipNode: AccessibilityNodeInfo?, reason: String) {
+        retryCount++
         cooldownUntil = SystemClock.elapsedRealtime() + AFTER_SWIPE_COOLDOWN_MS
 
         var clicked = false
@@ -263,18 +341,25 @@ class AdSkipService : AccessibilityService() {
             }
         }
         if (clicked) {
-            appendLog("倒计时结束：已点击「跳过」按钮 ✓")
-            OverlayController.update(this, "已点击跳过 ✓")
+            appendLog("$reason：已点击「跳过」（第 $retryCount 次尝试）✓")
+            OverlayController.update(this, "✓")
         } else {
-            swipeUp("倒计时结束")
+            swipeUp(reason)
         }
 
+        if (retryCount >= MAX_ATTEMPTS) {
+            appendLog("连续 ${MAX_ATTEMPTS} 次仍未翻过广告，暂停尝试，等广告自然结束")
+        }
+
+        // 无论点还是滑，之后都进入 FALLBACK 节奏：广告角标若还在，隔 RETRY_GAP 再试
+        mode = Mode.FALLBACK
+        deadlineAt = SystemClock.elapsedRealtime() + RETRY_GAP_MS
         val n = skipCount.value + 1
         skipCount.value = n
         Prefs.setSkipCount(this, n)
         mainHandler.postDelayed({
             OverlayController.update(this@AdSkipService, null)
-        }, 1800L)
+        }, 1200L)
     }
 
     private fun swipeUp(reason: String) {
@@ -296,21 +381,23 @@ class AdSkipService : AccessibilityService() {
 
         val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-                appendLog("$reason：已自动上滑 ✓")
+                appendLog("$reason：已自动上滑 ✓（第 $retryCount 次尝试）")
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
-                appendLog("上滑手势被系统取消（可能手指正触屏），下个周期重试")
+                appendLog("上滑手势被系统取消（可能手指正触屏），稍后自动重试")
             }
         }, null)
         if (!dispatched) appendLog("上滑手势派发失败")
-        OverlayController.update(this, "已自动上滑 ✓")
+        OverlayController.update(this, "✓")
     }
 
     private fun resetToIdle(msg: String? = null) {
         if (msg != null) appendLog(msg)
         mode = Mode.IDLE
         deadlineAt = 0L
+        retryCount = 0
+        chipFirstSeenAt = 0L
     }
 
     // ------------------------------------------------------------------ 文字特征
