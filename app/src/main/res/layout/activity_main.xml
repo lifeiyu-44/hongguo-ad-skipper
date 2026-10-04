@@ -250,5 +250,13 @@
             android:text="@string/footer_hint"
             android:textColor="#8A8A93"
             android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/version_label"
+            android:textColor="#B0B0B8"
+            android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

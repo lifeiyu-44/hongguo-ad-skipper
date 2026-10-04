@@ -75,7 +75,8 @@ class AdSkipService : AccessibilityService() {
         private const val AFTER_SWIPE_COOLDOWN_MS = 4000L // 跳过尝试后的冷却（等翻页动画和加载完成）
         private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
         private const val CHIP_CONFIRM_MS = 700L          // 角标需连续出现约2个扫描周期才认定，防单帧误判
-        private const val MAX_ATTEMPTS = 4                // 同一波广告最多尝试次数（防反复滑动）
+        private const val HINT_ONLY_CONFIRM_MS = 2000L    // 「上滑继续看短剧」提示持续出现多久即视为广告（各类型通用信号）
+        private const val MAX_ATTEMPTS = 6                // 同一波广告最多尝试次数（覆盖被锁定期拒绝后的重试）
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
         private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
         private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
@@ -123,6 +124,7 @@ class AdSkipService : AccessibilityService() {
     private var lastCountdownSeenAt = 0L
     private var cooldownUntil = 0L
     private var chipFirstSeenAt = 0L       // 「广告」角标首次出现时间（连续出现判定用）
+    private var unlockSinceAt = 0L         // 「上滑继续看短剧」提示首次出现时间（通用信号判定用）
     private var lastAdSeenAt = 0L          // 最近一次见到广告特征的时间（闪断宽限判定用）
     private var fallbackSinceAt = 0L       // 本波广告兜底流程的开始时间（总时长上限用）
     private var retryCount = 0             // 当前这波广告已尝试次数
@@ -394,6 +396,7 @@ class AdSkipService : AccessibilityService() {
             return
         }
         lastAdSeenAt = now
+        if (!found.unlocked) unlockSinceAt = 0L
 
         // 红果提示「倒计时结束后即可滑动」= 仍在锁定期。
         // 屏幕上还有倒计时文字时：说明倒计时正在走，忽略该提示、按倒计时正常等待；
@@ -449,6 +452,17 @@ class AdSkipService : AccessibilityService() {
                             "检测到广告「$adContextText」（无倒计时），" +
                                     "${waitMs / 1000}s 后尝试上滑"
                         )
+                    }
+                } else if (found.unlocked) {
+                    // 通用兜底信号：底部「上滑继续看短剧」提示持续出现即判定为广告。
+                    // 部分广告的创意文字（直播中/点击进入游戏等）由广告SDK绘制、
+                    // 读不到文字节点，这行提示往往是唯一可靠的信号
+                    if (unlockSinceAt == 0L) unlockSinceAt = now
+                    if (now - unlockSinceAt >= HINT_ONLY_CONFIRM_MS) {
+                        mode = Mode.FALLBACK
+                        if (fallbackSinceAt == 0L) fallbackSinceAt = now
+                        deadlineAt = now
+                        appendLog("「${found.unlockText ?: "上滑继续看短剧"}」提示持续出现，判定为广告，准备上滑")
                     }
                 }
                 // 无任何广告特征时不动作：普通剧集页的滑动提示不是广告信号
@@ -508,6 +522,7 @@ class AdSkipService : AccessibilityService() {
         // 硬超时兜底：即使提示文字卡死不动，最多再多等 15 秒也强制执行
         hardDeadlineAt = now + (found.countdownSec + 15) * 1000L + Prefs.getExtraDelayMs(this)
         lastCountdownSeenAt = now
+        unlockSinceAt = 0L
         scheduleDeadlineKick(deadlineAt - now)
         if (first) {
             appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
@@ -623,6 +638,7 @@ class AdSkipService : AccessibilityService() {
         fallbackSinceAt = 0L
         retryCount = 0
         chipFirstSeenAt = 0L
+        unlockSinceAt = 0L
     }
 
     // ------------------------------------------------------------------ 文字特征
@@ -650,7 +666,7 @@ class AdSkipService : AccessibilityService() {
     }
 
     private fun isPromoAd(s: String?): Boolean {
-        if (s == null || s.length > 20) return false
+        if (s == null || s.length > 40) return false
         return LIVE_AD_REGEX.containsMatchIn(s) || GAME_AD_REGEX.containsMatchIn(s)
     }
 
