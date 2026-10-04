@@ -7,7 +7,7 @@
 ## 下载安装（安卓）
 
 - **直接下载 APK（始终指向最新版）**：[HongguoAdSkipper.apk](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases/latest/download/HongguoAdSkipper.apk)
-- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)（当前 v1.9，新增直播购物类广告适配）
+- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)（当前 v1.10，新增游戏类广告适配）
 
 手机/平板通用，支持 Android 7.0 及以上。下载后安装（提示未知来源时允许），再按下方「使用步骤」开启无障碍服务即可。
 
@@ -20,6 +20,7 @@
    - 底部提示：`3秒后可继续上滑观看短剧`（倒计时主特征，正则见 `AdSkipService.kt` 顶部 `COUNTDOWN_REGEX`）
    - 右上角「广告」角标（含 `广告 15s` 这类带单位的剩余秒数）
    - 直播购物类广告特征：`直播中` / `讲解中` / `已售N件`（这类广告无角标无倒计时）
+   - 游戏类广告特征：`点击进入游戏` / `点击试玩` 等按钮文字（仅作识别信号，绝不点击）
 3. 检测到倒计时后记录截止时间，并用屏幕上不断刷新的秒数持续校正。
 4. 倒计时归零 → 模拟一次**上滑手势**（`dispatchGesture`）翻到下一集；如果界面里有「跳过」按钮则优先点击。
 5. 上滑后进入 2.6 秒冷却期，避免误触下一集。
