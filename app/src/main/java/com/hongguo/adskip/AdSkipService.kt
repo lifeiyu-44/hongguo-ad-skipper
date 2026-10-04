@@ -56,8 +56,11 @@ class AdSkipService : AccessibilityService() {
         /** 红果拒绝滑动时的提示「倒计时结束后即可滑动」：出现说明仍在锁定期，应顺延重试 */
         val LOCKED_TOAST_REGEX = Regex("""倒计时结束后""")
 
-        /** 直播类购物广告的特征文字（无「广告」角标、无倒计时）：直播中/讲解中/已售N件 */
+        /** 直播购物类广告的特征文字（无「广告」角标、无倒计时）：直播中/讲解中/已售N件 */
         val LIVE_AD_REGEX = Regex("""直播中|讲解中|已售\s*\d+""")
+
+        /** 游戏类广告的特征按钮：点击进入游戏/点击试玩 等（仅作识别信号，绝不点击） */
+        val GAME_AD_REGEX = Regex("""点击进入游戏|点击试玩|立即试玩|点击游玩|点击开玩""")
 
         private const val AD_LABEL = "广告"
 
@@ -271,8 +274,8 @@ class AdSkipService : AccessibilityService() {
         var adChipText: String? = null      // 触发角标识别的原始文字（诊断用）
         var unlocked: Boolean = false
         var unlockText: String? = null      // 「上滑继续观看」类提示原文（诊断用）
-        var liveAd: Boolean = false
-        var liveAdText: String? = null      // 直播类广告特征原文（直播中/讲解中/已售N件）
+        var promoAd: Boolean = false
+        var promoAdText: String? = null     // 推广类广告特征原文（直播中/讲解中/点击进入游戏等）
         var lockedToast: Boolean = false    // 红果提示「倒计时结束后即可滑动」（锁定期信号）
         var skipNode: AccessibilityNodeInfo? = null
     }
@@ -324,9 +327,9 @@ class AdSkipService : AccessibilityService() {
                 result.unlocked = true
                 result.unlockText = (text ?: desc)?.take(16)
             }
-            if (!result.liveAd && (isLiveAd(text) || isLiveAd(desc))) {
-                result.liveAd = true
-                result.liveAdText = (text ?: desc)?.take(16)
+            if (!result.promoAd && (isPromoAd(text) || isPromoAd(desc))) {
+                result.promoAd = true
+                result.promoAdText = (text ?: desc)?.take(16)
             }
             if (!result.lockedToast && (text?.contains(LOCKED_TOAST_REGEX) == true ||
                         desc?.contains(LOCKED_TOAST_REGEX) == true)
@@ -369,9 +372,10 @@ class AdSkipService : AccessibilityService() {
 
     private fun handleInTarget(found: ScanResult, now: Long) {
         val hasCountdown = found.countdownSec >= 0
-        // 广告上下文：右上角「广告」角标，或直播类广告特征（直播中/讲解中/已售N件）
-        val adContext = found.adChip || found.liveAd
-        val adContextText = found.adChipText ?: found.liveAdText ?: "广告"
+        // 广告上下文：右上角「广告」角标，或推广类广告特征
+        // （直播购物：直播中/讲解中/已售N件；游戏广告：点击进入游戏 等）
+        val adContext = found.adChip || found.promoAd
+        val adContextText = found.adChipText ?: found.promoAdText ?: "广告"
         val hasAd = hasCountdown || adContext || found.unlocked || found.lockedToast
 
         // 屏幕上既无倒计时也无「广告」角标：广告已结束（或本来就没有），复位
@@ -645,9 +649,9 @@ class AdSkipService : AccessibilityService() {
         return UNLOCK_HINT_REGEX.containsMatchIn(s)
     }
 
-    private fun isLiveAd(s: String?): Boolean {
+    private fun isPromoAd(s: String?): Boolean {
         if (s == null || s.length > 20) return false
-        return LIVE_AD_REGEX.containsMatchIn(s)
+        return LIVE_AD_REGEX.containsMatchIn(s) || GAME_AD_REGEX.containsMatchIn(s)
     }
 
     private fun AccessibilityNodeInfo.findClickableSelfOrParent(): AccessibilityNodeInfo? {
