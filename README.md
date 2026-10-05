@@ -7,7 +7,7 @@
 ## 下载安装（安卓）
 
 - **直接下载 APK（始终指向最新版）**：[HongguoAdSkipper.apk](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases/latest/download/HongguoAdSkipper.apk)
-- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)（当前 v1.11，修复直播/游戏类广告漏识别）
+- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)（当前 v1.12，修复手机端倒计时漏识别）
 
 手机/平板通用，支持 Android 7.0 及以上。下载后安装（提示未知来源时允许），再按下方「使用步骤」开启无障碍服务即可。
 
@@ -17,7 +17,7 @@
 
 1. 通过 **无障碍服务（AccessibilityService）** 轮询前台窗口，判断当前是否为红果短剧（包名 `com.phoenix.read`）。
 2. 遍历当前界面的视图树，匹配三类广告特征文字（均只认屏幕内可见的节点）：
-   - 底部提示：`3秒后可继续上滑观看短剧`（倒计时主特征，正则见 `AdSkipService.kt` 顶部 `COUNTDOWN_REGEX`）
+   - 底部提示：`3秒后可继续上滑观看短剧`（平板端）/ `5s 后可继续上滑观看`（手机端，拉丁字母 s），两种文案都识别（正则见 `AdSkipService.kt` 顶部 `COUNTDOWN_REGEX`）
    - 右上角「广告」角标（含 `广告 15s` 这类带单位的剩余秒数）
    - 直播购物类广告特征：`直播中` / `讲解中` / `已售N件`（这类广告无角标无倒计时）
    - 游戏类广告特征：`点击进入游戏` / `点击试玩` 等按钮文字（仅作识别信号，绝不点击）
