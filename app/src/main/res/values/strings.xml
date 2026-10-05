@@ -36,5 +36,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.11 · 手机/平板通用</string>
+    <string name="version_label">版本 1.12 · 手机/平板通用</string>
 </resources>

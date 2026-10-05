@@ -34,10 +34,11 @@ class AdSkipService : AccessibilityService() {
 
     companion object {
         /**
-         * 倒计时提示特征，匹配如「3秒后可继续上滑观看短剧」。
+         * 倒计时提示特征，两种文案都要认：
+         *   平板端「3秒后可继续上滑观看短剧」、手机端「5s 后可继续上滑观看」（拉丁字母 s）。
          * 若红果短剧更新后文案变化导致识别失效，改这一行即可。
          */
-        val COUNTDOWN_REGEX = Regex("""(\d+)\s*秒后[^0-9]{0,10}?(上滑|滑动|继续|观看)""")
+        val COUNTDOWN_REGEX = Regex("""(\d+)\s*[秒sS]\s*后[^0-9]{0,10}?(上滑|滑动|继续|观看)""")
 
         /** 「广告」角标上带单位的剩余秒数（备用特征），如「广告 15s」 */
         val CHIP_COUNTDOWN_REGEX = Regex("""广告\s*(\d{1,3})\s*[sS秒](?![a-zA-Z])""")
@@ -56,8 +57,8 @@ class AdSkipService : AccessibilityService() {
         /** 红果拒绝滑动时的提示「倒计时结束后即可滑动」：出现说明仍在锁定期，应顺延重试 */
         val LOCKED_TOAST_REGEX = Regex("""倒计时结束后""")
 
-        /** 直播购物类广告的特征文字（无「广告」角标、无倒计时）：直播中/讲解中/已售N件 */
-        val LIVE_AD_REGEX = Regex("""直播中|讲解中|已售\s*\d+""")
+        /** 直播购物类广告的特征文字（无「广告」角标、无倒计时）：直播中/讲解中/已售N件/点击进入直播间 */
+        val LIVE_AD_REGEX = Regex("""直播中|讲解中|已售\s*\d+|点击进入直播间""")
 
         /** 游戏类广告的特征按钮：点击进入游戏/点击试玩 等（仅作识别信号，绝不点击） */
         val GAME_AD_REGEX = Regex("""点击进入游戏|点击试玩|立即试玩|点击游玩|点击开玩""")
@@ -407,7 +408,10 @@ class AdSkipService : AccessibilityService() {
                 if (fallbackSinceAt == 0L) fallbackSinceAt = now
                 appendLog("红果提示仍在锁定期（倒计时结束后才可滑动），顺延自动上滑")
             }
-            deadlineAt = maxOf(deadlineAt, now + LOCKED_BACKOFF_MS)
+            // 被拒次数越多退避越长（1.5s → 3s → 4.5s … 上限 6s），
+            // 即使遇到完全未知的锁定期广告也不会反复顶撞弹出拒绝提示
+            val backoff = (LOCKED_BACKOFF_MS * maxOf(1, retryCount)).coerceAtMost(6000L)
+            deadlineAt = maxOf(deadlineAt, now + backoff)
             scheduleDeadlineKick(deadlineAt - now)
             publishAfterDecision(now)
             return
