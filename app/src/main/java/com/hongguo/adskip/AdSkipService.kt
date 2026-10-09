@@ -76,20 +76,28 @@ class AdSkipService : AccessibilityService() {
         private const val AFTER_SWIPE_COOLDOWN_MS = 4000L // 跳过尝试后的冷却（等翻页动画和加载完成）
         private const val AD_GONE_GRACE_MS = 2000L        // 倒计时文字消失多久视为广告已不在
         private const val CHIP_CONFIRM_MS = 700L          // 角标需连续出现约2个扫描周期才认定，防单帧误判
-        private const val HINT_ONLY_CONFIRM_MS = 2000L    // 「上滑继续看短剧」提示持续出现多久即视为广告（各类型通用信号）
-        private const val MAX_ATTEMPTS = 6                // 同一波广告最多尝试次数（覆盖被锁定期拒绝后的重试）
+        private const val HINT_ONLY_CONFIRM_MS = 1200L    // 「上滑继续看短剧」提示持续出现多久即视为广告（各类型通用信号）
+        private const val UNLOCK_BLINK_GRACE_MS = 900L    // 提示闪断宽限：间隔多久内重新出现仍算连续
+        private const val MAX_ATTEMPTS = 8                // 同一波广告最多尝试次数（覆盖被锁定期拒绝后的重试）
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
         private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
         private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
         private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
 
         // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
-        // 距离拉到约 6 成屏高、速度加快，保证位移过半必翻页；翻不动由重试兜底
+        // 常规起手：从屏幕下部起手，长距离快速滑动
         private const val SWIPE_DURATION_MS = 220L
         private const val SWIPE_START_FRACTION_PORTRAIT = 0.80f
         private const val SWIPE_END_FRACTION_PORTRAIT = 0.16f
         private const val SWIPE_START_FRACTION_LANDSCAPE = 0.78f
         private const val SWIPE_END_FRACTION_LANDSCAPE = 0.18f
+        // 上部起手：直播购物类广告底部是可滚动商品面板，从下部起手手势会被
+        // 面板拦截导致翻页失败；改为从画面上部起手（避开面板），速度更快
+        private const val SWIPE_UPPER_DURATION_MS = 200L
+        private const val SWIPE_UPPER_START_PORTRAIT = 0.50f
+        private const val SWIPE_UPPER_END_PORTRAIT = 0.04f
+        private const val SWIPE_UPPER_START_LANDSCAPE = 0.50f
+        private const val SWIPE_UPPER_END_LANDSCAPE = 0.05f
 
         // ---- 供 UI 订阅的状态 ----
         val running = MutableStateFlow(false)
@@ -126,6 +134,8 @@ class AdSkipService : AccessibilityService() {
     private var cooldownUntil = 0L
     private var chipFirstSeenAt = 0L       // 「广告」角标首次出现时间（连续出现判定用）
     private var unlockSinceAt = 0L         // 「上滑继续看短剧」提示首次出现时间（通用信号判定用）
+    private var lastUnlockSeenAt = 0L      // 最近一次见到该提示的时间（闪断宽限用）
+    private var lastSheetLikely = false    // 最近一轮扫描是否发现底部商品面板（决定上滑起手位置）
     private var lastAdSeenAt = 0L          // 最近一次见到广告特征的时间（闪断宽限判定用）
     private var fallbackSinceAt = 0L       // 本波广告兜底流程的开始时间（总时长上限用）
     private var retryCount = 0             // 当前这波广告已尝试次数
@@ -265,6 +275,12 @@ class AdSkipService : AccessibilityService() {
                 merged.unlocked = true
                 merged.unlockText = f.unlockText
             }
+            if (!merged.promoAd && f.promoAd) {
+                merged.promoAd = true
+                merged.promoAdText = f.promoAdText
+            }
+            if (!merged.sheet && f.sheet) merged.sheet = true
+            if (!merged.lockedToast && f.lockedToast) merged.lockedToast = true
             if (merged.skipNode == null) merged.skipNode = f.skipNode
         }
         return merged
@@ -279,6 +295,7 @@ class AdSkipService : AccessibilityService() {
         var unlockText: String? = null      // 「上滑继续观看」类提示原文（诊断用）
         var promoAd: Boolean = false
         var promoAdText: String? = null     // 推广类广告特征原文（直播中/讲解中/点击进入游戏等）
+        var sheet: Boolean = false          // 底部商品面板特征（查看详情等，决定上滑起手位置）
         var lockedToast: Boolean = false    // 红果提示「倒计时结束后即可滑动」（锁定期信号）
         var skipNode: AccessibilityNodeInfo? = null
     }
@@ -333,6 +350,9 @@ class AdSkipService : AccessibilityService() {
             if (!result.promoAd && (isPromoAd(text) || isPromoAd(desc))) {
                 result.promoAd = true
                 result.promoAdText = (text ?: desc)?.take(16)
+            }
+            if (!result.sheet && (text?.contains("查看详情") == true || desc?.contains("查看详情") == true)) {
+                result.sheet = true
             }
             if (!result.lockedToast && (text?.contains(LOCKED_TOAST_REGEX) == true ||
                         desc?.contains(LOCKED_TOAST_REGEX) == true)
@@ -397,7 +417,8 @@ class AdSkipService : AccessibilityService() {
             return
         }
         lastAdSeenAt = now
-        if (!found.unlocked) unlockSinceAt = 0L
+        if (found.unlocked) lastUnlockSeenAt = now
+        lastSheetLikely = found.sheet || found.promoAd
 
         // 红果提示「倒计时结束后即可滑动」= 仍在锁定期。
         // 屏幕上还有倒计时文字时：说明倒计时正在走，忽略该提示、按倒计时正常等待；
@@ -460,8 +481,9 @@ class AdSkipService : AccessibilityService() {
                 } else if (found.unlocked) {
                     // 通用兜底信号：底部「上滑继续看短剧」提示持续出现即判定为广告。
                     // 部分广告的创意文字（直播中/点击进入游戏等）由广告SDK绘制、
-                    // 读不到文字节点，这行提示往往是唯一可靠的信号
-                    if (unlockSinceAt == 0L) unlockSinceAt = now
+                    // 读不到文字节点，这行提示往往是唯一可靠的信号；
+                    // 闪断宽限：短暂读不到不清零，避免界面重绘打断连续计时
+                    if (now - lastUnlockSeenAt > UNLOCK_BLINK_GRACE_MS) unlockSinceAt = now
                     if (now - unlockSinceAt >= HINT_ONLY_CONFIRM_MS) {
                         mode = Mode.FALLBACK
                         if (fallbackSinceAt == 0L) fallbackSinceAt = now
@@ -611,20 +633,45 @@ class AdSkipService : AccessibilityService() {
         val h = dm.heightPixels.toFloat()
         if (w <= 0f || h <= 0f) return
         val portrait = h >= w
-        val startY = h * (if (portrait) SWIPE_START_FRACTION_PORTRAIT else SWIPE_START_FRACTION_LANDSCAPE)
-        val endY = h * (if (portrait) SWIPE_END_FRACTION_PORTRAIT else SWIPE_END_FRACTION_LANDSCAPE)
+        // 有底部商品面板（直播购物广告等）或已重试过的：改从画面上部起手，
+        // 避免手势被商品面板拦截；首次尝试保持下部起手（常规广告最稳）
+        val useUpper = lastSheetLikely || retryCount >= 2
+        val startY: Float
+        val endY: Float
+        val durationMs: Long
+        if (portrait) {
+            if (useUpper) {
+                startY = h * SWIPE_UPPER_START_PORTRAIT
+                endY = h * SWIPE_UPPER_END_PORTRAIT
+                durationMs = SWIPE_UPPER_DURATION_MS
+            } else {
+                startY = h * SWIPE_START_FRACTION_PORTRAIT
+                endY = h * SWIPE_END_FRACTION_PORTRAIT
+                durationMs = SWIPE_DURATION_MS
+            }
+        } else {
+            if (useUpper) {
+                startY = h * SWIPE_UPPER_START_LANDSCAPE
+                endY = h * SWIPE_UPPER_END_LANDSCAPE
+                durationMs = SWIPE_UPPER_DURATION_MS
+            } else {
+                startY = h * SWIPE_START_FRACTION_LANDSCAPE
+                endY = h * SWIPE_END_FRACTION_LANDSCAPE
+                durationMs = SWIPE_DURATION_MS
+            }
+        }
 
         val path = Path().apply {
             moveTo(w / 2f, startY)
             lineTo(w / 2f, endY)
         }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, SWIPE_DURATION_MS))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
         val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-                appendLog("$reason：已自动上滑 ✓（第 $retryCount 次尝试）")
+                appendLog("$reason：已自动上滑 ✓（第 $retryCount 次尝试·${if (useUpper) "上部起手" else "下部起手"}）")
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
