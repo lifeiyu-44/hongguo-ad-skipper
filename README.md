@@ -7,7 +7,7 @@
 ## 下载安装（安卓）
 
 - **直接下载 APK（始终指向最新版）**：[HongguoAdSkipper.apk](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases/latest/download/HongguoAdSkipper.apk)
-- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)（当前 v1.12，修复手机端倒计时漏识别）
+- **版本页面**：[Releases](https://github.com/lifeiyu-44/hongguo-ad-skipper/releases)（当前 v1.13，修复直播购物类广告不翻页）
 
 手机/平板通用，支持 Android 7.0 及以上。下载后安装（提示未知来源时允许），再按下方「使用步骤」开启无障碍服务即可。
 
