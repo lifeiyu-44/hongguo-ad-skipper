@@ -811,12 +811,12 @@ class AdSkipService : AccessibilityService() {
         }
     }
 
-    /** 依次尝试配置地址与电脑的两个局域网地址，任一成功即完成 */
+    /** 依次尝试配置地址与电脑的有线/无线两个局域网地址，任一成功即完成 */
     private fun uploadWithFallback(img: File?, txt: File, onResult: (Boolean) -> Unit) {
         val candidates = linkedSetOf(
             Prefs.getFeedbackUrl(this),
-            "http://192.168.5.10:8765/report",
-            "http://192.168.5.2:8765/report"
+            "http://192.168.5.2:8765/report",   // 有线网卡（优先：当前电脑常用）
+            "http://192.168.5.10:8765/report"   // 无线网卡（备用）
         ).filter { it.isNotBlank() }
         fun tryNext(list: List<String>) {
             if (list.isEmpty()) {
@@ -914,7 +914,7 @@ class AdSkipService : AccessibilityService() {
                 val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     doOutput = true
-                    connectTimeout = 15000
+                    connectTimeout = 4000
                     readTimeout = 30000
                     setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
                 }
