@@ -161,6 +161,7 @@ class AdSkipService : AccessibilityService() {
     private var lastForegroundPackage: String? = null // 最近一次前台包名（反馈用）
     private var feedbackBusy = false                  // 一键反馈进行中保护
     private var lastReportAt = 0L                     // 上次反馈时间（冷却用，防误触连点）
+    private var lastProbeNoticePkg: String? = null    // 同类广告样式提示去重（防日志刷屏）
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -190,12 +191,12 @@ class AdSkipService : AccessibilityService() {
         instance = this
         running.value = true
         skipCount.value = Prefs.getSkipCount(this)
-        // 清理历史上被误加入监测列表的本应用（设置页文字曾被误识别为广告特征）
-        val cleaned = Prefs.getTargetPackages(this) - packageName
-        Prefs.setTargetPackages(
-            this,
-            if (cleaned.isEmpty()) setOf(Prefs.DEFAULT_TARGET) else cleaned
-        )
+        // 监测列表固定为红果官方包：清理历史遗留（曾因"自动学习"误加其他应用，
+        // 导致"打开红果短剧"提示未安装、并误监测无关应用）
+        if (Prefs.getTargetPackages(this) != setOf(Prefs.DEFAULT_TARGET)) {
+            Prefs.setTargetPackages(this, setOf(Prefs.DEFAULT_TARGET))
+            appendLog("已重置监测列表为：${Prefs.DEFAULT_TARGET}")
+        }
         val dm = resources.displayMetrics
         val orient = if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"
         appendLog("服务已启动 v${BuildConfig.VERSION_NAME}（屏幕 ${dm.widthPixels}×${dm.heightPixels}，$orient）")
@@ -612,12 +613,13 @@ class AdSkipService : AccessibilityService() {
         now + sec * 1000L + Prefs.getExtraDelayMs(this) + DEADLINE_BUFFER_MS
 
     private fun probeUnknownApp(root: AccessibilityNodeInfo, pkg: String) {
-        // 绝不把本应用自己加入监测（设置页文字可能含"N秒后…上滑"字样）
+        // 仅在日志中提示发现同类广告样式的应用；不再自动加入监测列表
+        // （曾因误加其他应用导致"打开红果短剧"提示未安装、并误监测无关应用）
         if (pkg == packageName) return
         val found = findAdSignature(root, PROBE_NODE_LIMIT)
-        if (found.countdownSec >= 0 && pkg !in Prefs.getTargetPackages(this)) {
-            Prefs.setTargetPackages(this, Prefs.getTargetPackages(this) + pkg)
-            appendLog("在 $pkg 中发现同类广告样式，已自动加入监测")
+        if (found.countdownSec >= 0 && lastProbeNoticePkg != pkg) {
+            lastProbeNoticePkg = pkg
+            appendLog("提示：在 $pkg 中发现同类广告样式（未加入监测）")
         }
     }
 
@@ -892,6 +894,7 @@ class AdSkipService : AccessibilityService() {
         val dm = resources.displayMetrics
         sb.appendLine("屏幕: ${dm.widthPixels}x${dm.heightPixels} ${if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"}")
         sb.appendLine("前台应用: ${lastForegroundPackage ?: "?"}")
+        sb.appendLine("监测列表: ${Prefs.getTargetPackages(this).joinToString("、")}")
         sb.appendLine("当前模式: $mode ｜ 本波尝试次数: $retryCount ｜ 累计跳过: ${skipCount.value}")
         val s = lastScan
         if (s != null) {

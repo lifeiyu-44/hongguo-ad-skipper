@@ -304,12 +304,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openTargetApp() {
-        val pkg = Prefs.getTargetPackages(this).firstOrNull() ?: Prefs.DEFAULT_TARGET
-        val intent = packageManager.getLaunchIntentForPackage(pkg)
-        if (intent != null) {
-            startActivity(intent)
-        } else {
-            Toast.makeText(this, getString(R.string.toast_target_missing, pkg), Toast.LENGTH_LONG).show()
+        // 永远优先打开红果官方包（监测列表可能含历史遗留项，绝不能取"第一个"）
+        val targets = linkedSetOf(Prefs.DEFAULT_TARGET).apply {
+            addAll(Prefs.getTargetPackages(this@MainActivity))
         }
+        for (pkg in targets) {
+            val intent = packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                startActivity(intent)
+                return
+            }
+        }
+        Toast.makeText(
+            this,
+            getString(R.string.toast_target_missing, Prefs.DEFAULT_TARGET),
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
