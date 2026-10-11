@@ -106,7 +106,28 @@ const server = http.createServer((req, res) => {
       'Content-Type': 'application/vnd.android.package-archive',
       'Content-Length': stat.size,
     });
-    fs.createReadStream(APK_FILE).pipe(res);
+    // 流错误保护：客户端中途断开/网络中断时不能让进程崩溃
+    const stream = fs.createReadStream(APK_FILE);
+    stream.on('error', (e) => {
+      log('[下载中断] 读取安装包失败：', e.message);
+      try {
+        res.destroy();
+      } catch (_) {
+      }
+    });
+    res.on('error', () => {
+      try {
+        stream.destroy();
+      } catch (_) {
+      }
+    });
+    res.on('close', () => {
+      try {
+        stream.destroy();
+      } catch (_) {
+      }
+    });
+    stream.pipe(res);
     log(`[更新] 已向 ${req.socket.remoteAddress} 下发安装包（${stat.size} 字节）`);
     return;
   }
@@ -176,6 +197,14 @@ const server = http.createServer((req, res) => {
 
 ensureDir(OUT_DIR);
 ensureDir(UPDATES_DIR);
+
+// 全局兜底：任何未捕获异常都不让服务退出（个人工具，保持在线优先）
+process.on('uncaughtException', (e) => {
+  log('[崩溃拦截] 未捕获异常：', e && e.message ? e.message : String(e));
+});
+process.on('unhandledRejection', (e) => {
+  log('[崩溃拦截] 未处理的Promise拒绝：', e && e.message ? e.message : String(e));
+});
 server.listen(PORT, '0.0.0.0', () => {
   log('====================================');
   log(' 红果广告跳过 · 反馈接收服务已启动');
