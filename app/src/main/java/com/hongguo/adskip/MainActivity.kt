@@ -309,16 +309,39 @@ class MainActivity : AppCompatActivity() {
             addAll(Prefs.getTargetPackages(this@MainActivity))
         }
         for (pkg in targets) {
-            val intent = packageManager.getLaunchIntentForPackage(pkg)
-            if (intent != null) {
-                startActivity(intent)
-                return
-            }
+            if (launchPackage(pkg)) return
         }
         Toast.makeText(
             this,
             getString(R.string.toast_target_missing, Prefs.DEFAULT_TARGET),
             Toast.LENGTH_LONG
         ).show()
+    }
+
+    /**
+     * 双保险拉起：
+     * ① 标准入口（getLaunchIntentForPackage）；
+     * ② 失败则用"显式包名直启"（不依赖包可见性查询，绕过部分新系统的限制）。
+     */
+    private fun launchPackage(pkg: String): Boolean {
+        try {
+            packageManager.getLaunchIntentForPackage(pkg)?.let {
+                startActivity(it)
+                return true
+            }
+        } catch (_: Exception) {
+        }
+        return try {
+            startActivity(
+                Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setPackage(pkg)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }
