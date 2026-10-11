@@ -322,6 +322,7 @@ class AdSkipService : AccessibilityService() {
             }
             if (!merged.sheet && f.sheet) merged.sheet = true
             if (!merged.lockedToast && f.lockedToast) merged.lockedToast = true
+            if (!merged.mallPromoAd && f.mallPromoAd) merged.mallPromoAd = true
             merged.textNodeCount += f.textNodeCount
             if (merged.skipNode == null) merged.skipNode = f.skipNode
         }
@@ -340,6 +341,7 @@ class AdSkipService : AccessibilityService() {
         var sheet: Boolean = false          // 底部商品面板特征（查看详情等，决定上滑起手位置）
         var lockedToast: Boolean = false    // 红果提示「倒计时结束后即可滑动」（锁定期信号）
         var textNodeCount: Int = 0          // 屏幕内可读文字节点数（0=画面型广告特征）
+        var mallPromoAd: Boolean = false    // 商城推广卡片广告特征（可读文字极少，含"商城好物省心选"）
         var skipNode: AccessibilityNodeInfo? = null
     }
 
@@ -369,6 +371,11 @@ class AdSkipService : AccessibilityService() {
                 continue
             }
             result.textNodeCount++
+            if (!result.mallPromoAd && (text?.contains("商城好物省心选") == true ||
+                        desc?.contains("商城好物省心选") == true)
+            ) {
+                result.mallPromoAd = true
+            }
             if (result.countdownSec < 0) {
                 if (text != null) {
                     result.countdownSec = matchCountdown(text)
@@ -444,7 +451,7 @@ class AdSkipService : AccessibilityService() {
         // 屏幕连续读不到任何文字节点，且无任何已知广告特征时，判定为画面型广告并尝试上滑。
         // 限额：8 秒确认 + 5 分钟内最多 2 次，防止误翻连环。
         if (Prefs.isVisualAdFallbackEnabled(this)) {
-            if (found.textNodeCount == 0) {
+            if (found.textNodeCount == 0 || found.mallPromoAd) {
                 if (emptySinceAt == 0L) emptySinceAt = now
                 val windowStart = now - EMPTY_FLIP_WINDOW_MS
                 while (emptyFlipTimes.isNotEmpty() && emptyFlipTimes.first() < windowStart) {
@@ -456,7 +463,10 @@ class AdSkipService : AccessibilityService() {
                 ) {
                     emptyFlipTimes.addLast(now)
                     emptySinceAt = now
-                    appendLog("屏幕连续读不到任何文字，疑似画面型广告，尝试上滑")
+                    appendLog(
+                        "屏幕几乎读不到文字，疑似画面型广告（" +
+                                (if (found.mallPromoAd) "商城推广卡片" else "空屏") + "），尝试上滑"
+                    )
                     attemptSkip(null, "画面型广告兜底", countdownVisible = false)
                     publishAfterDecision(now)
                     return
