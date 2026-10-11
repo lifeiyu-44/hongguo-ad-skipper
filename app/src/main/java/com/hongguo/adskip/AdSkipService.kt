@@ -93,7 +93,7 @@ class AdSkipService : AccessibilityService() {
         private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
         private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
         // ---- 画面型广告兜底（可选功能，默认开启）----
-        private const val EMPTY_TREE_CONFIRM_MS = 8000L   // 屏幕几乎读不到文字持续多久判定为画面型广告
+        private const val EMPTY_TREE_CONFIRM_MS = 5000L   // 屏幕几乎读不到文字持续多久判定为画面型广告
         private const val EMPTY_BLIP_GRACE_MS = 3000L     // 闪断宽限：短暂读到文字（界面重绘）不清零计时
         private const val EMPTY_FLIP_MAX = 2              // 窗口内最多尝试次数（防误翻连环）
         private const val EMPTY_FLIP_WINDOW_MS = 300000L  // 次数统计窗口
@@ -456,7 +456,10 @@ class AdSkipService : AccessibilityService() {
             val emptyish = found.textNodeCount == 0 || found.mallPromoAd
             if (emptyish) {
                 lastEmptySeenAt = now
-                if (emptySinceAt == 0L) emptySinceAt = now
+                if (emptySinceAt == 0L) {
+                    emptySinceAt = now
+                    appendLog("屏幕几乎读不到文字，开始计时（5 秒后自动尝试上滑）")
+                }
             } else if (now - lastEmptySeenAt > EMPTY_BLIP_GRACE_MS) {
                 // 读到文字且持续超过宽限期，计时清零（避免界面重绘的瞬时节点打断判定）
                 emptySinceAt = 0L
