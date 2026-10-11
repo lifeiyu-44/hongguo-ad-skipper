@@ -48,6 +48,30 @@ object FeedbackOverlay {
         mainHandler.post { view?.alpha = alpha }
     }
 
+    /**
+     * 提交结果反馈：小圆点短暂变绿显示 ✓（成功）或变红显示 !（失败）。
+     * Android 12+ 系统禁止后台应用弹 Toast，这是唯一可靠的提交确认方式。
+     */
+    fun flashResult(success: Boolean) {
+        mainHandler.post {
+            val v = view ?: return@post
+            try {
+                v.text = if (success) "✓" else "!"
+                (v.background as? GradientDrawable)?.setColor(
+                    if (success) 0xE62E9E5B.toInt() else 0xE6D0433C.toInt()
+                )
+                mainHandler.postDelayed({
+                    try {
+                        v.text = "反"
+                        (v.background as? GradientDrawable)?.setColor(0x7A6E6E78.toInt())
+                    } catch (_: Exception) {
+                    }
+                }, 2500L)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun release() {
         shown = false
         mainHandler.post { detach() }

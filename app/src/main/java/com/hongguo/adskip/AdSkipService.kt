@@ -820,6 +820,7 @@ class AdSkipService : AccessibilityService() {
             // 静默上传（自动尝试电脑的多个局域网地址）；
             // 本 App 不含任何分享面板代码，永远不会弹出分享窗口
             uploadWithFallback(imgFile, txtFile) { ok ->
+                FeedbackOverlay.flashResult(ok)
                 if (ok) {
                     Toast.makeText(
                         this,
