@@ -2,7 +2,6 @@ package com.hongguo.adskip
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -17,7 +16,6 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.DataOutputStream
 import java.io.File
@@ -188,7 +186,7 @@ class AdSkipService : AccessibilityService() {
         skipCount.value = Prefs.getSkipCount(this)
         val dm = resources.displayMetrics
         val orient = if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"
-        appendLog("服务已启动，开始监测（屏幕 ${dm.widthPixels}×${dm.heightPixels}，$orient）")
+        appendLog("服务已启动 v${BuildConfig.VERSION_NAME}（屏幕 ${dm.widthPixels}×${dm.heightPixels}，$orient）")
         mainHandler.post(ticker)
     }
 
@@ -789,34 +787,52 @@ class AdSkipService : AccessibilityService() {
                 }
             }
             appendLog("反馈已生成：${txtFile.name}${if (imgFile != null) "（含截图）" else "（无截图）"}")
-            val url = Prefs.getFeedbackUrl(this)
-            if (url.isNotBlank()) {
-                // 配置了上报服务器：静默上传到电脑。
-                // 失败自动重试一次；无论如何都不弹出分享面板（零弹窗要求）
-                uploadReport(url, imgFile, txtFile) { ok ->
-                    if (ok) {
-                        Toast.makeText(this, "反馈已提交到电脑 ✓", Toast.LENGTH_SHORT).show()
-                    } else {
-                        appendLog("上传失败，10 秒后自动重试一次")
-                        mainHandler.postDelayed({
-                            uploadReport(url, imgFile, txtFile) { ok2 ->
-                                Toast.makeText(
-                                    this,
-                                    if (ok2) "反馈已提交到电脑 ✓"
-                                    else "上传失败：请确认手机与电脑连同一个 WiFi（反馈已保存在手机里）",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
-                        }, 10000L)
-                    }
+            // 静默上传（自动尝试电脑的多个局域网地址）；
+            // 本 App 不含任何分享面板代码，永远不会弹出分享窗口
+            uploadWithFallback(imgFile, txtFile) { ok ->
+                if (ok) {
+                    Toast.makeText(this, "反馈已提交到电脑 ✓", Toast.LENGTH_SHORT).show()
+                } else {
+                    appendLog("全部地址上传失败，10 秒后自动重试")
+                    mainHandler.postDelayed({
+                        uploadWithFallback(imgFile, txtFile) { ok2 ->
+                            Toast.makeText(
+                                this,
+                                if (ok2) "反馈已提交到电脑 ✓"
+                                else "上传失败，反馈已保存在手机里（请确认手机连着家里 WiFi）",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }, 10000L)
                 }
-            } else {
-                // 地址被手动清空时才使用分享方式
-                shareReport(imgFile, txtFile)
             }
         } catch (e: Exception) {
             appendLog("反馈生成失败：${e.message}")
         }
+    }
+
+    /** 依次尝试配置地址与电脑的两个局域网地址，任一成功即完成 */
+    private fun uploadWithFallback(img: File?, txt: File, onResult: (Boolean) -> Unit) {
+        val candidates = linkedSetOf(
+            Prefs.getFeedbackUrl(this),
+            "http://192.168.5.10:8765/report",
+            "http://192.168.5.2:8765/report"
+        ).filter { it.isNotBlank() }
+        fun tryNext(list: List<String>) {
+            if (list.isEmpty()) {
+                onResult(false)
+                return
+            }
+            uploadReport(list.first(), img, txt) { ok ->
+                if (ok) {
+                    onResult(true)
+                } else {
+                    appendLog("地址 ${list.first()} 不通，自动尝试下一个")
+                    tryNext(list.drop(1))
+                }
+            }
+        }
+        tryNext(candidates)
     }
 
     /** 生成反馈文本：设备信息 + 识别快照 + 屏幕可见文字 + 最近日志 */
@@ -888,29 +904,6 @@ class AdSkipService : AccessibilityService() {
         } catch (_: Exception) {
         }
         return out.toList()
-    }
-
-    /** 打开系统分享面板：把截图和诊断信息发给微信文件传输助手等 */
-    private fun shareReport(img: File?, txt: File) {
-        try {
-            val send = Intent(Intent.ACTION_SEND).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            if (img != null) {
-                val uri = FileProvider.getUriForFile(this, "com.hongguo.adskip.fileprovider", img)
-                send.type = "image/png"
-                send.putExtra(Intent.EXTRA_STREAM, uri)
-                send.putExtra(Intent.EXTRA_TEXT, buildReportText())
-            } else {
-                send.type = "text/plain"
-                send.putExtra(Intent.EXTRA_TEXT, buildReportText())
-            }
-            startActivity(Intent.createChooser(send, "发送问题反馈").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (e: Exception) {
-            val path = txt.parentFile?.absolutePath ?: ""
-            appendLog("打开分享失败（${e.message}），反馈已保存在：$path")
-            Toast.makeText(this, "反馈已保存到：$path", Toast.LENGTH_LONG).show()
-        }
     }
 
     /** 可选：把反馈 POST 到自定义服务器（multipart：report 文本 + screenshot 图片） */
