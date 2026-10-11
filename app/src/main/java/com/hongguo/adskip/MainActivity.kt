@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
         val targetsText = findViewById<TextView>(R.id.targetsText)
         val logView = findViewById<TextView>(R.id.logView)
         val btnClearLog = findViewById<Button>(R.id.btnClearLog)
+        val btnShareLog = findViewById<Button>(R.id.btnShareLog)
 
         switchAuto.isChecked = Prefs.isAutoSwipeEnabled(this)
         switchAuto.setOnCheckedChangeListener { _, checked ->
@@ -91,6 +92,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
         btnClearLog.setOnClickListener { AdSkipService.clearLogs() }
+        btnShareLog.setOnClickListener {
+            val text = AdSkipService.logs.value.joinToString("\n")
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "红果广告跳过-运行日志")
+                putExtra(Intent.EXTRA_TEXT, text.ifEmpty { "（暂无日志）" })
+            }
+            startActivity(Intent.createChooser(send, getString(R.string.btn_share_log)))
+        }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {

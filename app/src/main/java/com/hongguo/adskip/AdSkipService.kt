@@ -170,7 +170,9 @@ class AdSkipService : AccessibilityService() {
         instance = this
         running.value = true
         skipCount.value = Prefs.getSkipCount(this)
-        appendLog("服务已启动，开始监测")
+        val dm = resources.displayMetrics
+        val orient = if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"
+        appendLog("服务已启动，开始监测（屏幕 ${dm.widthPixels}×${dm.heightPixels}，$orient）")
         mainHandler.post(ticker)
     }
 
@@ -418,7 +420,10 @@ class AdSkipService : AccessibilityService() {
         }
         lastAdSeenAt = now
         if (found.unlocked) lastUnlockSeenAt = now
-        lastSheetLikely = found.sheet || found.promoAd
+        // 进入翻页流程后（FALLBACK）一律用「上部起手」：直播购物类整屏广告的
+        // 下半屏常是商品面板/直播手势区，从下部起手容易被拦截；倒计时结束
+        // 的翻页走 COUNTING 路径不受影响，保持原有的下部起手
+        lastSheetLikely = found.sheet || found.promoAd || mode == Mode.FALLBACK
 
         // 红果提示「倒计时结束后即可滑动」= 仍在锁定期。
         // 屏幕上还有倒计时文字时：说明倒计时正在走，忽略该提示、按倒计时正常等待；

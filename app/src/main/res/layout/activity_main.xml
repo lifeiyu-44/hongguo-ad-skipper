@@ -218,6 +218,19 @@
                         android:textStyle="bold" />
 
                     <Button
+                        android:id="@+id/btnShareLog"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:minHeight="0dp"
+                        android:paddingStart="16dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="16dp"
+                        android:paddingBottom="6dp"
+                        android:text="@string/btn_share_log" />
+
+                    <Button
                         android:id="@+id/btnClearLog"
                         style="?attr/materialButtonOutlinedStyle"
                         android:layout_width="wrap_content"
