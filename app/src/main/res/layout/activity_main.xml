@@ -231,6 +231,22 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:text="@string/btn_discover" />
+
+                <Button
+                    android:id="@+id/btnCaptureAuth"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/btn_capture_auth" />
+
+                <Button
+                    android:id="@+id/btnCheckUpdate"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/btn_check_update" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

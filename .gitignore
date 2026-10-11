@@ -13,3 +13,6 @@ captures/
 # 反馈接收服务的接收目录（含用户截图与日志，不入库）
 receiver/reports/
 receiver/server.log
+
+# 反馈接收服务的升级包目录（本地部署产物，不入库）
+receiver/updates/

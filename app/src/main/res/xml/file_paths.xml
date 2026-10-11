@@ -4,4 +4,9 @@
     <external-files-path
         name="feedback"
         path="feedback/" />
+
+    <!-- App 内升级下载的安装包 -->
+    <cache-path
+        name="update"
+        path="update/" />
 </paths>

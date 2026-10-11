@@ -1,13 +1,16 @@
 package com.hongguo.adskip
 
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -33,6 +36,28 @@ class MainActivity : AppCompatActivity() {
         val editFeedbackUrl = findViewById<EditText>(R.id.editFeedbackUrl)
         val btnSaveFeedbackUrl = findViewById<Button>(R.id.btnSaveFeedbackUrl)
         val btnDiscover = findViewById<Button>(R.id.btnDiscover)
+        val btnCaptureAuth = findViewById<Button>(R.id.btnCaptureAuth)
+        val btnCheckUpdate = findViewById<Button>(R.id.btnCheckUpdate)
+
+        // Android 11 以下的屏幕截图授权（MediaProjection，授权一次）
+        val captureAuthLauncher =
+            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                val ok = result.resultCode == RESULT_OK && result.data != null &&
+                        ScreenCapture.start(this, result.resultCode, result.data!!)
+                Toast.makeText(
+                    this,
+                    if (ok) R.string.capture_auth_ok else R.string.capture_auth_cancel,
+                    Toast.LENGTH_LONG
+                ).show()
+                refreshCaptureButton(btnCaptureAuth)
+            }
+        btnCaptureAuth.setOnClickListener {
+            val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            captureAuthLauncher.launch(mgr.createScreenCaptureIntent())
+        }
+        refreshCaptureButton(btnCaptureAuth)
+
+        btnCheckUpdate.setOnClickListener { UpdateChecker.check(this, silent = false) }
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
         val delayLabel = findViewById<TextView>(R.id.delayLabel)
         val fallbackBar = findViewById<SeekBar>(R.id.fallbackBar)
@@ -185,6 +210,20 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshTargetsText(findViewById(R.id.targetsText))
+        refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
+        // 启动/回到前台时静默检查一次更新（发现新版本才弹提示）
+        UpdateChecker.check(this, silent = true)
+    }
+
+    private fun refreshCaptureButton(btn: Button) {
+        if (!ScreenCapture.needed()) {
+            btn.visibility = View.GONE
+            return
+        }
+        btn.visibility = View.VISIBLE
+        btn.text = getString(
+            if (ScreenCapture.isReady) R.string.capture_auth_on else R.string.btn_capture_auth
+        )
     }
 
     private fun snapDelay(value: Int): Int = (value / 50) * 50

@@ -14,6 +14,18 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8765;
 const OUT_DIR = path.join(__dirname, 'reports');
 const INDEX_FILE = path.join(OUT_DIR, 'index.txt');
 const LOG_FILE = path.join(__dirname, 'server.log');
+const UPDATES_DIR = path.join(__dirname, 'updates');
+const VERSION_FILE = path.join(UPDATES_DIR, 'version.json');
+const APK_FILE = path.join(UPDATES_DIR, 'HongguoAdSkipper.apk');
+
+/** 读取当前可供 App 升级的版本信息 */
+function readVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8'));
+  } catch (_) {
+    return { version: '0.0' };
+  }
+}
 
 /** 同时输出到控制台和日志文件（便于排查手机是否连到过本服务） */
 function log(...args) {
@@ -70,8 +82,32 @@ function stamp() {
 const server = http.createServer((req, res) => {
   // /ping：供 App 局域网自动发现时识别本服务（不写日志，避免扫描刷屏）
   if (req.method === 'GET' && req.url.startsWith('/ping')) {
+    const v = readVersion();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, app: 'hongguo-ad-skipper', port: PORT }) + '\n');
+    res.end(
+      JSON.stringify({
+        ok: true,
+        app: 'hongguo-ad-skipper',
+        port: PORT,
+        version: v.version || '0.0',
+      }) + '\n'
+    );
+    return;
+  }
+  // /update/apk：供 App 自动升级时下载最新安装包
+  if (req.method === 'GET' && req.url.startsWith('/update/apk')) {
+    if (!fs.existsSync(APK_FILE)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('no apk');
+      return;
+    }
+    const stat = fs.statSync(APK_FILE);
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.android.package-archive',
+      'Content-Length': stat.size,
+    });
+    fs.createReadStream(APK_FILE).pipe(res);
+    log(`[更新] 已向 ${req.socket.remoteAddress} 下发安装包（${stat.size} 字节）`);
     return;
   }
   log(`[请求] ${req.method} ${req.url} 来自 ${req.socket.remoteAddress}`);
@@ -139,6 +175,7 @@ const server = http.createServer((req, res) => {
 });
 
 ensureDir(OUT_DIR);
+ensureDir(UPDATES_DIR);
 server.listen(PORT, '0.0.0.0', () => {
   log('====================================');
   log(' 红果广告跳过 · 反馈接收服务已启动');

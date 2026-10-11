@@ -184,6 +184,12 @@ class AdSkipService : AccessibilityService() {
         instance = this
         running.value = true
         skipCount.value = Prefs.getSkipCount(this)
+        // 清理历史上被误加入监测列表的本应用（设置页文字曾被误识别为广告特征）
+        val cleaned = Prefs.getTargetPackages(this) - packageName
+        Prefs.setTargetPackages(
+            this,
+            if (cleaned.isEmpty()) setOf(Prefs.DEFAULT_TARGET) else cleaned
+        )
         val dm = resources.displayMetrics
         val orient = if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"
         appendLog("服务已启动 v${BuildConfig.VERSION_NAME}（屏幕 ${dm.widthPixels}×${dm.heightPixels}，$orient）")
@@ -277,7 +283,8 @@ class AdSkipService : AccessibilityService() {
         try {
             for (w in windows) {
                 val r = w.root ?: continue
-                if (r.packageName?.toString() in Prefs.getTargetPackages(this)) roots.add(r)
+                val rp = r.packageName?.toString() ?: continue
+                if (rp != packageName && rp in Prefs.getTargetPackages(this)) roots.add(r)
             }
         } catch (_: Exception) {
         }
@@ -599,6 +606,8 @@ class AdSkipService : AccessibilityService() {
         now + sec * 1000L + Prefs.getExtraDelayMs(this) + DEADLINE_BUFFER_MS
 
     private fun probeUnknownApp(root: AccessibilityNodeInfo, pkg: String) {
+        // 绝不把本应用自己加入监测（设置页文字可能含"N秒后…上滑"字样）
+        if (pkg == packageName) return
         val found = findAdSignature(root, PROBE_NODE_LIMIT)
         if (found.countdownSec >= 0 && pkg !in Prefs.getTargetPackages(this)) {
             Prefs.setTargetPackages(this, Prefs.getTargetPackages(this) + pkg)
@@ -764,7 +773,13 @@ class AdSkipService : AccessibilityService() {
                     finishReport(null)
                 }
             } else {
-                finishReport(null)
+                // Android 11 以下：用 MediaProjection 常驻捕捉取最新一帧
+                //（需用户在设置页授权一次，之后全程静默）
+                val bmp = ScreenCapture.captureLatest()
+                if (bmp == null) {
+                    appendLog("未取到画面（截图授权未开启或抓取失败），本次反馈不带截图")
+                }
+                finishReport(bmp)
             }
         }, 200L)
     }

@@ -4,6 +4,9 @@
     <!-- 联网权限：一键反馈上传到电脑的接收服务 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- App 内升级：下载新版本后拉起系统安装界面 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- 检测网络状态：断网时暂停自动跳过，避免误翻页 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 

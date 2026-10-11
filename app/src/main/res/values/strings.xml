@@ -23,6 +23,12 @@
     <string name="btn_save">保存</string>
     <string name="toast_saved">已保存</string>
     <string name="btn_discover">自动发现电脑（扫描局域网）</string>
+    <string name="btn_capture_auth">开启屏幕截图（反馈自动带画面）</string>
+    <string name="capture_auth_on">屏幕截图已开启 ✓</string>
+    <string name="capture_auth_ok">屏幕截图已开启，反馈时将自动附带画面</string>
+    <string name="capture_auth_cancel">未授权，反馈将不带截图</string>
+    <string name="btn_check_update">检查更新（从电脑直接升级）</string>
+    <string name="update_uptodate_fmt">已是最新版本（%1$s）</string>
     <string name="discover_scanning">正在扫描局域网，请稍候…</string>
     <string name="discover_found_fmt">已找到接收服务：%1$s，已保存</string>
     <string name="discover_notfound">未找到：请确认手机与电脑连同一 WiFi，且电脑上接收服务已启动</string>
@@ -33,7 +39,7 @@
     <string name="state_fallback">检测到广告（无倒计时），稍后自动上滑</string>
     <string name="count_text">累计自动跳过 %1$d 个广告</string>
     <string name="delay_value">倒计时结束后延迟 %1$d 毫秒再上滑</string>
-    <string name="fallback_value">无倒计时的广告：出现 %1$d 秒后开始尝试上滑</string>
+    <string name="fallback_value">无倒计时广告：出现后等待 %1$d 秒再上滑</string>
     <string name="targets_value">当前监测包名：%1$s</string>
 
     <string name="toast_service_not_running">请先开启无障碍服务</string>
@@ -41,9 +47,9 @@
 
     <string name="count_zero_literal">累计自动跳过 0 个广告</string>
     <string name="delay_literal">倒计时结束后延迟 250 毫秒再上滑</string>
-    <string name="fallback_literal">无倒计时的广告：出现 10 秒后开始尝试上滑</string>
+    <string name="fallback_literal">无倒计时广告：出现后等待 10 秒再上滑</string>
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.21 · 手机/平板通用</string>
+    <string name="version_label">版本 1.22 · 手机/平板通用</string>
 </resources>
