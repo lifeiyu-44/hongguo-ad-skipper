@@ -78,9 +78,9 @@ object Prefs {
     fun setFeedbackBtnYPercent(ctx: Context, v: Int) =
         sp(ctx).edit().putInt(KEY_FB_Y, v.coerceIn(2, 96)).apply()
 
-    /** 画面型广告兜底：屏幕连续读不到任何文字时自动尝试上滑（默认关闭，有极小误翻风险） */
+    /** 画面型广告兜底：屏幕几乎读不到文字时自动尝试上滑（默认开启，可在设置中关闭） */
     fun isVisualAdFallbackEnabled(ctx: Context) =
-        sp(ctx).getBoolean(KEY_VISUAL_FALLBACK, false)
+        sp(ctx).getBoolean(KEY_VISUAL_FALLBACK, true)
 
     fun setVisualAdFallbackEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean(KEY_VISUAL_FALLBACK, v).apply()

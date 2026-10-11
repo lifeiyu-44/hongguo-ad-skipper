@@ -19,7 +19,7 @@
 
     <string name="switch_auto">自动跳过广告（倒计时结束后自动上滑）</string>
     <string name="switch_feedback">显示一键反馈按钮（仅在红果中显示，轻点提交问题反馈）</string>
-    <string name="switch_visual_fallback">画面型广告兜底（屏幕几乎无文字时自动上滑，默认关闭）</string>
+    <string name="switch_visual_fallback">画面型广告兜底（屏幕几乎无文字时自动上滑，可关闭）</string>
     <string name="feedback_url_hint">上报服务器地址（默认已指向电脑，可修改）</string>
     <string name="btn_save">保存</string>
     <string name="toast_saved">已保存</string>
@@ -65,5 +65,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.30 · 手机/平板通用</string>
+    <string name="version_label">版本 1.31 · 手机/平板通用</string>
 </resources>
