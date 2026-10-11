@@ -2,16 +2,28 @@ package com.hongguo.adskip
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.DataOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -141,6 +153,9 @@ class AdSkipService : AccessibilityService() {
     private var retryCount = 0             // 当前这波广告已尝试次数
     private var probeTick = 0
     private var offlineLogged = false      // 断网提示只记一次，避免日志刷屏
+    private var lastScan: ScanResult? = null          // 最近一轮扫描结果（反馈用）
+    private var lastForegroundPackage: String? = null // 最近一次前台包名（反馈用）
+    private var feedbackBusy = false                  // 一键反馈进行中保护
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -183,6 +198,7 @@ class AdSkipService : AccessibilityService() {
         countdownRemain.value = -1
         mode = Mode.IDLE
         mainHandler.removeCallbacks(ticker)
+        FeedbackOverlay.release()
         super.onDestroy()
     }
 
@@ -225,13 +241,17 @@ class AdSkipService : AccessibilityService() {
         val pkg = root.packageName?.toString() ?: return
         val now = SystemClock.elapsedRealtime()
 
+        // 一键反馈按钮：仅在目标应用前台时显示（开关可在设置中关闭）
+        val inTarget = pkg in Prefs.getTargetPackages(this)
+        lastForegroundPackage = pkg
+        FeedbackOverlay.setVisible(this, inTarget)
+
         if (!Prefs.isAutoSwipeEnabled(this)) {
             if (mode != Mode.IDLE) resetToIdle()
             publishState(State.IDLE, -1)
             return
         }
 
-        val inTarget = pkg in Prefs.getTargetPackages(this)
         if (!inTarget) {
             // 非目标应用：低频轻量探测；若发现同样的倒计时文案，自动把该包名加入监测
             probeTick++
@@ -396,6 +416,7 @@ class AdSkipService : AccessibilityService() {
     // ------------------------------------------------------------------ 广告决策
 
     private fun handleInTarget(found: ScanResult, now: Long) {
+        lastScan = found
         val hasCountdown = found.countdownSec >= 0
         // 广告上下文：右上角「广告」角标，或推广类广告特征
         // （直播购物：直播中/讲解中/已售N件；游戏广告：点击进入游戏 等）
@@ -684,6 +705,221 @@ class AdSkipService : AccessibilityService() {
             }
         }, null)
         if (!dispatched) appendLog("上滑手势派发失败")
+    }
+
+    // ------------------------------------------------------------------ 一键反馈
+
+    /** 悬浮按钮轻点回调：抓取当前页面截图 + 诊断信息，生成反馈并分享 */
+    fun onFeedbackTapped() {
+        if (feedbackBusy) return
+        feedbackBusy = true
+        mainHandler.post { captureReport() }
+    }
+
+    private fun captureReport() {
+        FeedbackOverlay.setAlpha(0f)
+        appendLog("收到一键反馈，正在抓取当前页面…")
+        // 兜底：无论截图回调是否返回，6 秒后解除占用并恢复按钮
+        mainHandler.postDelayed({
+            if (feedbackBusy) {
+                feedbackBusy = false
+                FeedbackOverlay.setAlpha(1f)
+                appendLog("反馈抓取超时，已取消")
+            }
+        }, 6000L)
+        mainHandler.postDelayed({
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    takeScreenshot(
+                        Display.DEFAULT_DISPLAY,
+                        ContextCompat.getMainExecutor(this),
+                        object : AccessibilityService.TakeScreenshotCallback {
+                            override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
+                                var soft: Bitmap? = null
+                                try {
+                                    soft = Bitmap.wrapHardwareBuffer(
+                                        screenshot.hardwareBuffer,
+                                        screenshot.colorSpace
+                                    )?.copy(Bitmap.Config.ARGB_8888, false)
+                                } catch (_: Exception) {
+                                } finally {
+                                    try {
+                                        screenshot.hardwareBuffer.close()
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                                finishReport(soft)
+                            }
+
+                            override fun onFailure(errorCode: Int) {
+                                appendLog("截图失败（错误码 $errorCode），改为仅提交日志")
+                                finishReport(null)
+                            }
+                        }
+                    )
+                } catch (e: Exception) {
+                    appendLog("截图异常：${e.message}")
+                    finishReport(null)
+                }
+            } else {
+                finishReport(null)
+            }
+        }, 200L)
+    }
+
+    private fun finishReport(bmp: Bitmap?) {
+        FeedbackOverlay.setAlpha(1f)
+        feedbackBusy = false
+        try {
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val dir = File(getExternalFilesDir(null), "feedback").apply { mkdirs() }
+            val txtFile = File(dir, "反馈_$ts.txt")
+            txtFile.writeText(buildReportText())
+            var imgFile: File? = null
+            if (bmp != null) {
+                val f = File(dir, "反馈_$ts.png")
+                try {
+                    FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 92, it) }
+                    imgFile = f
+                } catch (_: Exception) {
+                }
+            }
+            appendLog("反馈已生成：${txtFile.name}${if (imgFile != null) "（含截图）" else "（无截图）"}")
+            val url = Prefs.getFeedbackUrl(this)
+            if (url.isNotBlank()) uploadReport(url, imgFile, txtFile)
+            shareReport(imgFile, txtFile)
+        } catch (e: Exception) {
+            appendLog("反馈生成失败：${e.message}")
+        }
+    }
+
+    /** 生成反馈文本：设备信息 + 识别快照 + 屏幕可见文字 + 最近日志 */
+    private fun buildReportText(): String {
+        val sb = StringBuilder()
+        sb.appendLine("== 红果广告跳过 · 问题反馈 ==")
+        sb.appendLine("时间: " + SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
+        sb.appendLine("版本: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        sb.appendLine("设备: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        val dm = resources.displayMetrics
+        sb.appendLine("屏幕: ${dm.widthPixels}x${dm.heightPixels} ${if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"}")
+        sb.appendLine("前台应用: ${lastForegroundPackage ?: "?"}")
+        sb.appendLine("当前模式: $mode ｜ 本波尝试次数: $retryCount ｜ 累计跳过: ${skipCount.value}")
+        val s = lastScan
+        if (s != null) {
+            sb.appendLine(
+                "识别快照: 倒计时=${if (s.countdownSec >= 0) "${s.countdownSec}秒(${s.countdownText})" else "无"}" +
+                        " ｜ 右上角角标=${if (s.adChip) "有(${s.adChipText})" else "无"}" +
+                        " ｜ 解锁提示=${if (s.unlocked) "有(${s.unlockText})" else "无"}"
+            )
+            sb.appendLine(
+                "          推广特征=${if (s.promoAd) "有(${s.promoAdText})" else "无"}" +
+                        " ｜ 商品面板=${if (s.sheet) "有" else "无"}" +
+                        " ｜ 锁定提示=${if (s.lockedToast) "有" else "无"}"
+            )
+        } else {
+            sb.appendLine("识别快照: （尚未产生扫描数据）")
+        }
+        sb.appendLine("-- 屏幕可见文字（供分析识别特征）--")
+        val texts = dumpVisibleTexts(40)
+        if (texts.isEmpty()) sb.appendLine("（读不到任何文字节点）") else texts.forEach { sb.appendLine(it) }
+        sb.appendLine("-- 最近运行日志 --")
+        logs.value.takeLast(60).reversed().forEach { sb.appendLine(it) }
+        return sb.toString()
+    }
+
+    /** 抓取当前屏幕上所有可见的短文字（诊断广告界面到底有哪些文字可读） */
+    private fun dumpVisibleTexts(limit: Int): List<String> {
+        val out = LinkedHashSet<String>()
+        try {
+            val dm = resources.displayMetrics
+            val w = dm.widthPixels
+            val h = dm.heightPixels
+            val roots = ArrayList<AccessibilityNodeInfo>()
+            try {
+                for (win in windows) {
+                    val r = win.root ?: continue
+                    if (r.packageName?.toString() in Prefs.getTargetPackages(this)) roots.add(r)
+                }
+            } catch (_: Exception) {
+            }
+            if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
+            for (r in roots) {
+                val queue = ArrayDeque<AccessibilityNodeInfo>()
+                queue.add(r)
+                var visited = 0
+                while (queue.isNotEmpty() && visited < 900 && out.size < limit) {
+                    val n = queue.removeFirst()
+                    visited++
+                    val t = n.text?.toString() ?: n.contentDescription?.toString()
+                    if (!t.isNullOrBlank() && t.length <= 24 && isVisibleOnScreen(n, w, h)) {
+                        out.add(t)
+                    }
+                    for (i in 0 until n.childCount) {
+                        n.getChild(i)?.let { queue.add(it) }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return out.toList()
+    }
+
+    /** 打开系统分享面板：把截图和诊断信息发给微信文件传输助手等 */
+    private fun shareReport(img: File?, txt: File) {
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            if (img != null) {
+                val uri = FileProvider.getUriForFile(this, "com.hongguo.adskip.fileprovider", img)
+                send.type = "image/png"
+                send.putExtra(Intent.EXTRA_STREAM, uri)
+                send.putExtra(Intent.EXTRA_TEXT, buildReportText())
+            } else {
+                send.type = "text/plain"
+                send.putExtra(Intent.EXTRA_TEXT, buildReportText())
+            }
+            startActivity(Intent.createChooser(send, "发送问题反馈").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            val path = txt.parentFile?.absolutePath ?: ""
+            appendLog("打开分享失败（${e.message}），反馈已保存在：$path")
+            Toast.makeText(this, "反馈已保存到：$path", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 可选：把反馈 POST 到自定义服务器（multipart：report 文本 + screenshot 图片） */
+    private fun uploadReport(url: String, img: File?, txt: File) {
+        Thread {
+            try {
+                val boundary = "----hongguo" + System.currentTimeMillis()
+                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = 15000
+                    readTimeout = 30000
+                    setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                }
+                DataOutputStream(conn.outputStream).use { out ->
+                    out.writeBytes("--$boundary\r\n")
+                    out.writeBytes("Content-Disposition: form-data; name=\"report\"\r\n\r\n")
+                    out.write(txt.readText().toByteArray(Charsets.UTF_8))
+                    out.writeBytes("\r\n")
+                    if (img != null && img.exists()) {
+                        out.writeBytes("--$boundary\r\n")
+                        out.writeBytes("Content-Disposition: form-data; name=\"screenshot\"; filename=\"${img.name}\"\r\n")
+                        out.writeBytes("Content-Type: image/png\r\n\r\n")
+                        img.inputStream().use { it.copyTo(out) }
+                        out.writeBytes("\r\n")
+                    }
+                    out.writeBytes("--$boundary--\r\n")
+                }
+                val code = conn.responseCode
+                conn.disconnect()
+                mainHandler.post { appendLog("反馈上传完成（HTTP $code）") }
+            } catch (e: Exception) {
+                mainHandler.post { appendLog("反馈上传失败：${e.message}") }
+            }
+        }.start()
     }
 
     private fun resetToIdle(msg: String? = null) {

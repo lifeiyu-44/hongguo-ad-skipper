@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
+import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -28,6 +29,9 @@ class MainActivity : AppCompatActivity() {
         val btnTestSwipe = findViewById<Button>(R.id.btnTestSwipe)
         val btnResetTargets = findViewById<Button>(R.id.btnResetTargets)
         val switchAuto = findViewById<MaterialSwitch>(R.id.switchAuto)
+        val switchFeedback = findViewById<MaterialSwitch>(R.id.switchFeedback)
+        val editFeedbackUrl = findViewById<EditText>(R.id.editFeedbackUrl)
+        val btnSaveFeedbackUrl = findViewById<Button>(R.id.btnSaveFeedbackUrl)
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
         val delayLabel = findViewById<TextView>(R.id.delayLabel)
         val fallbackBar = findViewById<SeekBar>(R.id.fallbackBar)
@@ -40,6 +44,17 @@ class MainActivity : AppCompatActivity() {
         switchAuto.isChecked = Prefs.isAutoSwipeEnabled(this)
         switchAuto.setOnCheckedChangeListener { _, checked ->
             Prefs.setAutoSwipeEnabled(this, checked)
+        }
+
+        switchFeedback.isChecked = Prefs.isFeedbackButtonEnabled(this)
+        switchFeedback.setOnCheckedChangeListener { _, checked ->
+            Prefs.setFeedbackButtonEnabled(this, checked)
+        }
+
+        editFeedbackUrl.setText(Prefs.getFeedbackUrl(this))
+        btnSaveFeedbackUrl.setOnClickListener {
+            Prefs.setFeedbackUrl(this, editFeedbackUrl.text.toString().trim())
+            Toast.makeText(this, R.string.toast_saved, Toast.LENGTH_SHORT).show()
         }
 
         delayBar.progress = Prefs.getExtraDelayMs(this)

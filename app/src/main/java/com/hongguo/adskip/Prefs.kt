@@ -15,6 +15,9 @@ object Prefs {
     private const val KEY_DELAY = "extra_delay_ms"
     private const val KEY_FALLBACK = "fallback_wait_ms"
     private const val KEY_COUNT = "skip_count"
+    private const val KEY_FB_BTN = "feedback_button"
+    private const val KEY_FB_URL = "feedback_url"
+    private const val KEY_FB_Y = "feedback_btn_y"
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -46,4 +49,21 @@ object Prefs {
     fun getSkipCount(ctx: Context) = sp(ctx).getInt(KEY_COUNT, 0)
 
     fun setSkipCount(ctx: Context, v: Int) = sp(ctx).edit().putInt(KEY_COUNT, v).apply()
+
+    /** 一键反馈悬浮按钮开关（仅在红果前台时显示） */
+    fun isFeedbackButtonEnabled(ctx: Context) = sp(ctx).getBoolean(KEY_FB_BTN, true)
+
+    fun setFeedbackButtonEnabled(ctx: Context, v: Boolean) =
+        sp(ctx).edit().putBoolean(KEY_FB_BTN, v).apply()
+
+    /** 反馈上报服务器地址（可选，留空则只用分享方式） */
+    fun getFeedbackUrl(ctx: Context): String = sp(ctx).getString(KEY_FB_URL, "") ?: ""
+
+    fun setFeedbackUrl(ctx: Context, v: String) = sp(ctx).edit().putString(KEY_FB_URL, v).apply()
+
+    /** 反馈按钮纵向位置（屏高百分比） */
+    fun getFeedbackBtnYPercent(ctx: Context) = sp(ctx).getInt(KEY_FB_Y, 42)
+
+    fun setFeedbackBtnYPercent(ctx: Context, v: Int) =
+        sp(ctx).edit().putInt(KEY_FB_Y, v.coerceIn(2, 96)).apply()
 }

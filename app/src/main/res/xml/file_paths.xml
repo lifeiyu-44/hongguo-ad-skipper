@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 一键反馈生成的截图文件 -->
+    <external-files-path
+        name="feedback"
+        path="feedback/" />
+</paths>
