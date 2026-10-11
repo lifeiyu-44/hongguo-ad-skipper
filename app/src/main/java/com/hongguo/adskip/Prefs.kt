@@ -21,6 +21,7 @@ object Prefs {
     private const val KEY_FB_BTN = "feedback_button"
     private const val KEY_FB_URL = "feedback_url"
     private const val KEY_FB_Y = "feedback_btn_y"
+    private const val KEY_VISUAL_FALLBACK = "visual_ad_fallback"
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -76,4 +77,11 @@ object Prefs {
 
     fun setFeedbackBtnYPercent(ctx: Context, v: Int) =
         sp(ctx).edit().putInt(KEY_FB_Y, v.coerceIn(2, 96)).apply()
+
+    /** 画面型广告兜底：屏幕连续读不到任何文字时自动尝试上滑（默认关闭，有极小误翻风险） */
+    fun isVisualAdFallbackEnabled(ctx: Context) =
+        sp(ctx).getBoolean(KEY_VISUAL_FALLBACK, false)
+
+    fun setVisualAdFallbackEnabled(ctx: Context, v: Boolean) =
+        sp(ctx).edit().putBoolean(KEY_VISUAL_FALLBACK, v).apply()
 }

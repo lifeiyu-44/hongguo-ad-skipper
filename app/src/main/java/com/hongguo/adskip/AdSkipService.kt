@@ -92,6 +92,10 @@ class AdSkipService : AccessibilityService() {
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
         private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
         private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
+        // ---- 画面型广告兜底（可选功能，默认关闭）----
+        private const val EMPTY_TREE_CONFIRM_MS = 8000L   // 屏幕连续读不到文字多久判定为画面型广告
+        private const val EMPTY_FLIP_MAX = 2              // 窗口内最多尝试次数（防误翻连环）
+        private const val EMPTY_FLIP_WINDOW_MS = 300000L  // 次数统计窗口
         private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
 
         // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
@@ -162,6 +166,8 @@ class AdSkipService : AccessibilityService() {
     private var feedbackBusy = false                  // 一键反馈进行中保护
     private var lastReportAt = 0L                     // 上次反馈时间（冷却用，防误触连点）
     private var lastProbeNoticePkg: String? = null    // 同类广告样式提示去重（防日志刷屏）
+    private var emptySinceAt = 0L                     // 屏幕读不到任何文字的起始时间（画面型广告检测）
+    private val emptyFlipTimes = ArrayDeque<Long>()   // 画面型广告兜底上滑的时间记录（限额用）
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -316,6 +322,7 @@ class AdSkipService : AccessibilityService() {
             }
             if (!merged.sheet && f.sheet) merged.sheet = true
             if (!merged.lockedToast && f.lockedToast) merged.lockedToast = true
+            merged.textNodeCount += f.textNodeCount
             if (merged.skipNode == null) merged.skipNode = f.skipNode
         }
         return merged
@@ -332,6 +339,7 @@ class AdSkipService : AccessibilityService() {
         var promoAdText: String? = null     // 推广类广告特征原文（直播中/讲解中/点击进入游戏等）
         var sheet: Boolean = false          // 底部商品面板特征（查看详情等，决定上滑起手位置）
         var lockedToast: Boolean = false    // 红果提示「倒计时结束后即可滑动」（锁定期信号）
+        var textNodeCount: Int = 0          // 屏幕内可读文字节点数（0=画面型广告特征）
         var skipNode: AccessibilityNodeInfo? = null
     }
 
@@ -360,6 +368,7 @@ class AdSkipService : AccessibilityService() {
                 collectChildren(node, queue)
                 continue
             }
+            result.textNodeCount++
             if (result.countdownSec < 0) {
                 if (text != null) {
                     result.countdownSec = matchCountdown(text)
@@ -430,6 +439,33 @@ class AdSkipService : AccessibilityService() {
 
     private fun handleInTarget(found: ScanResult, now: Long) {
         lastScan = found
+
+        // 画面型广告兜底（可选功能，默认关闭）：
+        // 屏幕连续读不到任何文字节点，且无任何已知广告特征时，判定为画面型广告并尝试上滑。
+        // 限额：8 秒确认 + 5 分钟内最多 2 次，防止误翻连环。
+        if (Prefs.isVisualAdFallbackEnabled(this)) {
+            if (found.textNodeCount == 0) {
+                if (emptySinceAt == 0L) emptySinceAt = now
+                val windowStart = now - EMPTY_FLIP_WINDOW_MS
+                while (emptyFlipTimes.isNotEmpty() && emptyFlipTimes.first() < windowStart) {
+                    emptyFlipTimes.removeFirst()
+                }
+                if (now - emptySinceAt >= EMPTY_TREE_CONFIRM_MS &&
+                    emptyFlipTimes.size < EMPTY_FLIP_MAX &&
+                    mode == Mode.IDLE
+                ) {
+                    emptyFlipTimes.addLast(now)
+                    emptySinceAt = now
+                    appendLog("屏幕连续读不到任何文字，疑似画面型广告，尝试上滑")
+                    attemptSkip(null, "画面型广告兜底", countdownVisible = false)
+                    publishAfterDecision(now)
+                    return
+                }
+            } else {
+                emptySinceAt = 0L
+            }
+        }
+
         val hasCountdown = found.countdownSec >= 0
         // 广告上下文：右上角「广告」角标，或推广类广告特征
         // （直播购物：直播中/讲解中/已售N件；游戏广告：点击进入游戏 等）
@@ -1003,6 +1039,7 @@ class AdSkipService : AccessibilityService() {
         retryCount = 0
         chipFirstSeenAt = 0L
         unlockSinceAt = 0L
+        emptySinceAt = 0L
     }
 
     // ------------------------------------------------------------------ 文字特征

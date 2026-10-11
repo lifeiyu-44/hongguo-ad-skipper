@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
         val btnResetTargets = findViewById<Button>(R.id.btnResetTargets)
         val switchAuto = findViewById<MaterialSwitch>(R.id.switchAuto)
         val switchFeedback = findViewById<MaterialSwitch>(R.id.switchFeedback)
+        val switchVisualFallback = findViewById<MaterialSwitch>(R.id.switchVisualFallback)
         val editFeedbackUrl = findViewById<EditText>(R.id.editFeedbackUrl)
         val btnSaveFeedbackUrl = findViewById<Button>(R.id.btnSaveFeedbackUrl)
         val btnDiscover = findViewById<Button>(R.id.btnDiscover)
@@ -135,6 +136,11 @@ class MainActivity : AppCompatActivity() {
         switchFeedback.isChecked = Prefs.isFeedbackButtonEnabled(this)
         switchFeedback.setOnCheckedChangeListener { _, checked ->
             Prefs.setFeedbackButtonEnabled(this, checked)
+        }
+
+        switchVisualFallback.isChecked = Prefs.isVisualAdFallbackEnabled(this)
+        switchVisualFallback.setOnCheckedChangeListener { _, checked ->
+            Prefs.setVisualAdFallbackEnabled(this, checked)
         }
 
         editFeedbackUrl.setText(Prefs.getFeedbackUrl(this))

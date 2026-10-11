@@ -147,6 +147,13 @@
                     android:layout_marginTop="4dp"
                     android:text="@string/switch_feedback" />
 
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switchVisualFallback"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/switch_visual_fallback" />
+
                 <TextView
                     android:id="@+id/delayLabel"
                     android:layout_width="match_parent"
