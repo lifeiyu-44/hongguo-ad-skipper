@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
         val switchFeedback = findViewById<MaterialSwitch>(R.id.switchFeedback)
         val editFeedbackUrl = findViewById<EditText>(R.id.editFeedbackUrl)
         val btnSaveFeedbackUrl = findViewById<Button>(R.id.btnSaveFeedbackUrl)
+        val btnDiscover = findViewById<Button>(R.id.btnDiscover)
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
         val delayLabel = findViewById<TextView>(R.id.delayLabel)
         val fallbackBar = findViewById<SeekBar>(R.id.fallbackBar)
@@ -55,6 +56,24 @@ class MainActivity : AppCompatActivity() {
         btnSaveFeedbackUrl.setOnClickListener {
             Prefs.setFeedbackUrl(this, editFeedbackUrl.text.toString().trim())
             Toast.makeText(this, R.string.toast_saved, Toast.LENGTH_SHORT).show()
+        }
+        btnDiscover.setOnClickListener {
+            btnDiscover.isEnabled = false
+            Toast.makeText(this, R.string.discover_scanning, Toast.LENGTH_SHORT).show()
+            LanDiscovery.discover { url ->
+                btnDiscover.isEnabled = true
+                if (url != null) {
+                    Prefs.setFeedbackUrl(this, url)
+                    editFeedbackUrl.setText(url)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.discover_found_fmt, url),
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    Toast.makeText(this, R.string.discover_notfound, Toast.LENGTH_LONG).show()
+                }
+            }
         }
 
         delayBar.progress = Prefs.getExtraDelayMs(this)

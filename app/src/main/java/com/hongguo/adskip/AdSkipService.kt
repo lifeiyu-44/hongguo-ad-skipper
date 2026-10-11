@@ -820,7 +820,18 @@ class AdSkipService : AccessibilityService() {
         ).filter { it.isNotBlank() }
         fun tryNext(list: List<String>) {
             if (list.isEmpty()) {
-                onResult(false)
+                // 已知地址全部不通：扫描局域网自动寻找接收服务（应对电脑 IP 变化）
+                appendLog("已知地址均不通，开始扫描局域网寻找接收服务…")
+                LanDiscovery.discover { found ->
+                    if (found != null) {
+                        appendLog("局域网发现接收服务：$found（已保存）")
+                        Prefs.setFeedbackUrl(this, found)
+                        uploadReport(found, img, txt) { ok -> onResult(ok) }
+                    } else {
+                        appendLog("局域网未发现接收服务")
+                        onResult(false)
+                    }
+                }
                 return
             }
             uploadReport(list.first(), img, txt) { ok ->

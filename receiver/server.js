@@ -68,6 +68,12 @@ function stamp() {
 }
 
 const server = http.createServer((req, res) => {
+  // /ping：供 App 局域网自动发现时识别本服务（不写日志，避免扫描刷屏）
+  if (req.method === 'GET' && req.url.startsWith('/ping')) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, app: 'hongguo-ad-skipper', port: PORT }) + '\n');
+    return;
+  }
   log(`[请求] ${req.method} ${req.url} 来自 ${req.socket.remoteAddress}`);
   if (req.method === 'POST' && req.url.startsWith('/report')) {
     const chunks = [];

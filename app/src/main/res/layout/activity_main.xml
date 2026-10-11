@@ -223,6 +223,14 @@
                         android:paddingBottom="6dp"
                         android:text="@string/btn_save" />
                 </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnDiscover"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/btn_discover" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
