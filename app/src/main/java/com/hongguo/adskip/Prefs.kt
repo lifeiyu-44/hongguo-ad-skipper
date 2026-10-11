@@ -59,9 +59,15 @@ object Prefs {
     fun setFeedbackButtonEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean(KEY_FB_BTN, v).apply()
 
-    /** 反馈上报服务器地址：默认指向电脑端接收服务，可在设置中修改；留空则退回分享方式 */
-    fun getFeedbackUrl(ctx: Context): String =
-        sp(ctx).getString(KEY_FB_URL, DEFAULT_FEEDBACK_URL) ?: DEFAULT_FEEDBACK_URL
+    /**
+     * 反馈上报服务器地址：默认指向电脑端接收服务。
+     * 任何「未设置 / 空值」都一律回落到默认地址，确保一键反馈永远走静默上传，
+     * 不会因为地址栏为空而弹出分享面板。
+     */
+    fun getFeedbackUrl(ctx: Context): String {
+        val v = sp(ctx).getString(KEY_FB_URL, null)
+        return if (v.isNullOrBlank()) DEFAULT_FEEDBACK_URL else v
+    }
 
     fun setFeedbackUrl(ctx: Context, v: String) = sp(ctx).edit().putString(KEY_FB_URL, v).apply()
 
