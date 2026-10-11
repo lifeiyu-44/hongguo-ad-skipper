@@ -13,6 +13,17 @@ const path = require('path');
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8765;
 const OUT_DIR = path.join(__dirname, 'reports');
 const INDEX_FILE = path.join(OUT_DIR, 'index.txt');
+const LOG_FILE = path.join(__dirname, 'server.log');
+
+/** 同时输出到控制台和日志文件（便于排查手机是否连到过本服务） */
+function log(...args) {
+  const line = `${new Date().toLocaleString()}  ${args.join(' ')}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(LOG_FILE, line + '\n', 'utf8');
+  } catch (_) {
+  }
+}
 
 function ensureDir(d) {
   fs.mkdirSync(d, { recursive: true });
@@ -57,6 +68,7 @@ function stamp() {
 }
 
 const server = http.createServer((req, res) => {
+  log(`[请求] ${req.method} ${req.url} 来自 ${req.socket.remoteAddress}`);
   if (req.method === 'POST' && req.url.startsWith('/report')) {
     const chunks = [];
     let size = 0;
@@ -97,15 +109,15 @@ const server = http.createServer((req, res) => {
           `${ts}  来自 ${req.socket.remoteAddress}  文本${reportText.length}字 ${imageBuf ? '含截图' : '无截图'}\n`,
           'utf8'
         );
-        console.log(
-          `[${ts}] 收到反馈：文本 ${reportText.length} 字` +
+        log(
+          `[收到反馈] 文本 ${reportText.length} 字` +
             `${imageBuf ? `，截图 ${imageBuf.length} 字节` : '，无截图'}` +
             `（来自 ${req.socket.remoteAddress}）`
         );
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: true, dir: ts }));
       } catch (e) {
-        console.error('处理失败:', e.message);
+        log('[错误] 处理失败:', e.message);
         res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('error');
       }
@@ -122,20 +134,18 @@ const server = http.createServer((req, res) => {
 
 ensureDir(OUT_DIR);
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('====================================');
-  console.log(' 红果广告跳过 · 反馈接收服务已启动');
-  console.log('====================================');
-  console.log('监听端口: ' + PORT + '（局域网可访问）');
-  console.log('反馈保存到: ' + OUT_DIR);
-  console.log('');
-  console.log('把下面任意一个地址填进 App 的「上报服务器地址」：');
+  log('====================================');
+  log(' 红果广告跳过 · 反馈接收服务已启动');
+  log('====================================');
+  log('监听端口: ' + PORT + '（局域网可访问）');
+  log('反馈保存到: ' + OUT_DIR);
+  log('把下面任意一个地址填进 App 的「上报服务器地址」：');
   for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
     for (const a of addrs || []) {
       if (a.family === 'IPv4' && !a.internal) {
-        console.log(`   http://${a.address}:${PORT}/report   （${name}）`);
+        log(`   http://${a.address}:${PORT}/report   （${name}）`);
       }
     }
   }
-  console.log('');
-  console.log('保持本窗口开着即可；关闭窗口则服务停止。');
+  log('保持本窗口开着即可；关闭窗口则服务停止。');
 });
