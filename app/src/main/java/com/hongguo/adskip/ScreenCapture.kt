@@ -31,6 +31,11 @@ object ScreenCapture {
     val isReady: Boolean
         get() = imageReader != null
 
+    /** 最近一次失败原因（供诊断日志用） */
+    @Volatile
+    var lastError: String? = null
+        private set
+
     /** 在设置页由用户完成系统授权后调用 */
     fun start(ctx: Context, resultCode: Int, data: Intent): Boolean {
         stop()
@@ -54,45 +59,60 @@ object ScreenCapture {
             projection = p
             imageReader = reader
             virtualDisplay = vd
+            lastError = null
             true
         } catch (e: Exception) {
             Log.w(TAG, "建立屏幕捕捉失败: ${e.message}")
+            lastError = e.message ?: "建立捕捉失败"
             stop()
             false
         }
     }
 
-    /** 取当前屏幕最新一帧（无授权时返回 null） */
+    /** 取当前屏幕最新一帧（无授权时返回 null）；需在后台线程调用 */
     fun captureLatest(): Bitmap? {
-        val reader = imageReader ?: return null
-        return try {
-            val image = reader.acquireLatestImage() ?: return null
-            try {
-                val plane = image.planes[0]
-                val buffer = plane.buffer
-                val pixelStride = plane.pixelStride
-                val rowStride = plane.rowStride
-                val rowPadding = rowStride - pixelStride * image.width
-                val bmp = Bitmap.createBitmap(
-                    image.width + rowPadding / pixelStride,
-                    image.height,
-                    Bitmap.Config.ARGB_8888
-                )
-                bmp.copyPixelsFromBuffer(buffer)
-                if (rowPadding == 0) {
-                    bmp
-                } else {
-                    val cropped = Bitmap.createBitmap(bmp, 0, 0, image.width, image.height)
-                    if (cropped !== bmp) bmp.recycle()
-                    cropped
-                }
-            } finally {
-                image.close()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "抓取画面失败: ${e.message}")
-            null
+        val reader = imageReader ?: run {
+            lastError = "未授权"
+            return null
         }
+        // 画面帧可能刚建立还未产出，短暂重试几次
+        for (attempt in 0 until 8) {
+            try {
+                val image = reader.acquireLatestImage()
+                if (image != null) {
+                    return try {
+                        val plane = image.planes[0]
+                        val buffer = plane.buffer
+                        val pixelStride = plane.pixelStride
+                        val rowStride = plane.rowStride
+                        val rowPadding = rowStride - pixelStride * image.width
+                        val bmp = Bitmap.createBitmap(
+                            image.width + rowPadding / pixelStride,
+                            image.height,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        bmp.copyPixelsFromBuffer(buffer)
+                        if (rowPadding == 0) {
+                            bmp
+                        } else {
+                            val cropped = Bitmap.createBitmap(bmp, 0, 0, image.width, image.height)
+                            if (cropped !== bmp) bmp.recycle()
+                            cropped
+                        }
+                    } finally {
+                        image.close()
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = e.message ?: "取帧异常"
+            }
+            try {
+                Thread.sleep(100)
+            } catch (_: InterruptedException) {
+            }
+        }
+        lastError = lastError ?: "无画面帧产出"
+        return null
     }
 
     fun stop() {

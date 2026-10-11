@@ -20,6 +20,19 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
+    // Android 11 以下的屏幕截图授权（MediaProjection，授权一次即可常驻）
+    private val captureAuthLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val ok = result.resultCode == RESULT_OK && result.data != null &&
+                    ScreenCapture.start(this, result.resultCode, result.data!!)
+            Toast.makeText(
+                this,
+                if (ok) R.string.capture_auth_ok else R.string.capture_auth_cancel,
+                Toast.LENGTH_LONG
+            ).show()
+            refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -38,24 +51,41 @@ class MainActivity : AppCompatActivity() {
         val btnDiscover = findViewById<Button>(R.id.btnDiscover)
         val btnCaptureAuth = findViewById<Button>(R.id.btnCaptureAuth)
         val btnCheckUpdate = findViewById<Button>(R.id.btnCheckUpdate)
-
-        // Android 11 以下的屏幕截图授权（MediaProjection，授权一次）
-        val captureAuthLauncher =
-            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                val ok = result.resultCode == RESULT_OK && result.data != null &&
-                        ScreenCapture.start(this, result.resultCode, result.data!!)
-                Toast.makeText(
-                    this,
-                    if (ok) R.string.capture_auth_ok else R.string.capture_auth_cancel,
-                    Toast.LENGTH_LONG
-                ).show()
-                refreshCaptureButton(btnCaptureAuth)
-            }
         btnCaptureAuth.setOnClickListener {
-            val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            captureAuthLauncher.launch(mgr.createScreenCaptureIntent())
+            if (ScreenCapture.isReady) {
+                // 已授权：当场测试截图
+                Toast.makeText(this, "正在测试截图…", Toast.LENGTH_SHORT).show()
+                Thread {
+                    val bmp = ScreenCapture.captureLatest()
+                    val err = ScreenCapture.lastError
+                    runOnUiThread {
+                        if (bmp != null) {
+                            bmp.recycle()
+                            Toast.makeText(this, R.string.capture_test_ok, Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(
+                                this,
+                                getString(R.string.capture_test_fail_fmt, err ?: "未知原因"),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }.start()
+            } else {
+                launchCaptureAuth()
+            }
         }
         refreshCaptureButton(btnCaptureAuth)
+
+        // Android 11 以下且未授权时，打开 App 主动引导一次
+        if (ScreenCapture.needed() && !ScreenCapture.isReady) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.capture_guide_title)
+                .setMessage(R.string.capture_guide_msg)
+                .setPositiveButton(R.string.capture_guide_ok) { _, _ -> launchCaptureAuth() }
+                .setNegativeButton(R.string.capture_guide_later, null)
+                .show()
+        }
 
         btnCheckUpdate.setOnClickListener { UpdateChecker.check(this, silent = false) }
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
@@ -215,6 +245,11 @@ class MainActivity : AppCompatActivity() {
         UpdateChecker.check(this, silent = true)
     }
 
+    private fun launchCaptureAuth() {
+        val mgr = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        captureAuthLauncher.launch(mgr.createScreenCaptureIntent())
+    }
+
     private fun refreshCaptureButton(btn: Button) {
         if (!ScreenCapture.needed()) {
             btn.visibility = View.GONE
@@ -222,7 +257,7 @@ class MainActivity : AppCompatActivity() {
         }
         btn.visibility = View.VISIBLE
         btn.text = getString(
-            if (ScreenCapture.isReady) R.string.capture_auth_on else R.string.btn_capture_auth
+            if (ScreenCapture.isReady) R.string.capture_ready_test else R.string.btn_capture_auth
         )
     }
 

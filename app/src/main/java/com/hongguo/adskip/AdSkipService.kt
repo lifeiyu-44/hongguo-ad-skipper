@@ -775,11 +775,20 @@ class AdSkipService : AccessibilityService() {
             } else {
                 // Android 11 以下：用 MediaProjection 常驻捕捉取最新一帧
                 //（需用户在设置页授权一次，之后全程静默）
-                val bmp = ScreenCapture.captureLatest()
-                if (bmp == null) {
-                    appendLog("未取到画面（截图授权未开启或抓取失败），本次反馈不带截图")
-                }
-                finishReport(bmp)
+                Thread {
+                    val bmp = ScreenCapture.captureLatest()
+                    mainHandler.post {
+                        if (bmp == null) {
+                            appendLog(
+                                if (!ScreenCapture.isReady)
+                                    "屏幕截图未授权：请在 App 设置里点「开启屏幕截图」（本次反馈不带截图）"
+                                else
+                                    "屏幕截图已授权但取帧失败：${ScreenCapture.lastError ?: "未知原因"}（本次反馈不带截图）"
+                            )
+                        }
+                        finishReport(bmp)
+                    }
+                }.start()
             }
         }, 200L)
     }
@@ -806,7 +815,12 @@ class AdSkipService : AccessibilityService() {
             // 本 App 不含任何分享面板代码，永远不会弹出分享窗口
             uploadWithFallback(imgFile, txtFile) { ok ->
                 if (ok) {
-                    Toast.makeText(this, "反馈已提交到电脑 ✓", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        this,
+                        if (imgFile != null) "反馈已提交到电脑 ✓"
+                        else "已提交（未带截图：请到 App 里点「开启屏幕截图」授权）",
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else {
                     appendLog("全部地址上传失败，10 秒后自动重试")
                     mainHandler.postDelayed({
