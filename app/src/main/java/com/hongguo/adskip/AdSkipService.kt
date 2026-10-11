@@ -156,6 +156,7 @@ class AdSkipService : AccessibilityService() {
     private var lastScan: ScanResult? = null          // 最近一轮扫描结果（反馈用）
     private var lastForegroundPackage: String? = null // 最近一次前台包名（反馈用）
     private var feedbackBusy = false                  // 一键反馈进行中保护
+    private var lastReportAt = 0L                     // 上次反馈时间（冷却用，防误触连点）
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -709,9 +710,12 @@ class AdSkipService : AccessibilityService() {
 
     // ------------------------------------------------------------------ 一键反馈
 
-    /** 悬浮按钮轻点回调：抓取当前页面截图 + 诊断信息，生成反馈并分享 */
+    /** 悬浮按钮轻点回调：抓取当前页面截图 + 诊断信息，生成反馈并提交 */
     fun onFeedbackTapped() {
-        if (feedbackBusy) return
+        val now = SystemClock.elapsedRealtime()
+        // 冷却 8 秒 + 进行中保护：防止误触导致反复提交、反复弹窗
+        if (feedbackBusy || now - lastReportAt < 8000L) return
+        lastReportAt = now
         feedbackBusy = true
         mainHandler.post { captureReport() }
     }
@@ -786,8 +790,21 @@ class AdSkipService : AccessibilityService() {
             }
             appendLog("反馈已生成：${txtFile.name}${if (imgFile != null) "（含截图）" else "（无截图）"}")
             val url = Prefs.getFeedbackUrl(this)
-            if (url.isNotBlank()) uploadReport(url, imgFile, txtFile)
-            shareReport(imgFile, txtFile)
+            if (url.isNotBlank()) {
+                // 配置了上报服务器：静默上传到电脑，不再弹出分享面板
+                Toast.makeText(this, "正在上传反馈到电脑…", Toast.LENGTH_SHORT).show()
+                uploadReport(url, imgFile, txtFile) { ok ->
+                    Toast.makeText(
+                        this,
+                        if (ok) "反馈已提交到电脑 ✓" else "上传失败，改用分享方式",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    if (!ok) shareReport(imgFile, txtFile)
+                }
+            } else {
+                // 未配置服务器：打开分享面板（可发微信文件传输助手）
+                shareReport(imgFile, txtFile)
+            }
         } catch (e: Exception) {
             appendLog("反馈生成失败：${e.message}")
         }
@@ -888,9 +905,9 @@ class AdSkipService : AccessibilityService() {
     }
 
     /** 可选：把反馈 POST 到自定义服务器（multipart：report 文本 + screenshot 图片） */
-    private fun uploadReport(url: String, img: File?, txt: File) {
+    private fun uploadReport(url: String, img: File?, txt: File, onResult: (Boolean) -> Unit) {
         Thread {
-            try {
+            val ok = try {
                 val boundary = "----hongguo" + System.currentTimeMillis()
                 val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
@@ -916,9 +933,12 @@ class AdSkipService : AccessibilityService() {
                 val code = conn.responseCode
                 conn.disconnect()
                 mainHandler.post { appendLog("反馈上传完成（HTTP $code）") }
+                code in 200..299
             } catch (e: Exception) {
                 mainHandler.post { appendLog("反馈上传失败：${e.message}") }
+                false
             }
+            mainHandler.post { onResult(ok) }
         }.start()
     }
 
