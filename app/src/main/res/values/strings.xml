@@ -42,6 +42,7 @@
     <string name="capture_auth_ok">屏幕截图已开启，反馈时将自动附带画面</string>
     <string name="capture_auth_cancel">未授权，反馈将不带截图</string>
     <string name="btn_check_update">检查更新（从电脑直接升级）</string>
+    <string name="update_available_fmt">发现新版本 %1$s（点此更新）</string>
     <string name="update_uptodate_fmt">已是最新版本（%1$s）</string>
     <string name="discover_scanning">正在扫描局域网，请稍候…</string>
     <string name="discover_found_fmt">已找到接收服务：%1$s，已保存</string>
@@ -65,5 +66,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.33 · 手机/平板通用</string>
+    <string name="version_label">版本 1.34 · 手机/平板通用</string>
 </resources>

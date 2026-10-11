@@ -108,16 +108,7 @@ class MainActivity : AppCompatActivity() {
         }
         refreshCaptureButton(btnCaptureAuth)
 
-        // Android 11 以下且未授权时，打开 App 主动引导一次
-        if (ScreenCapture.needed() && !ScreenCapture.isReady) {
-            android.app.AlertDialog.Builder(this)
-                .setTitle(R.string.capture_guide_title)
-                .setMessage(R.string.capture_guide_msg)
-                .setPositiveButton(R.string.capture_guide_ok) { _, _ -> launchCaptureAuth() }
-                .setNegativeButton(R.string.capture_guide_later, null)
-                .show()
-        }
-
+        // 不再自动弹引导窗：截图授权改为仅通过设置页按钮按需开启（消除启动弹窗骚扰）
         btnCheckUpdate.setOnClickListener { UpdateChecker.check(this, silent = false) }
         val delayBar = findViewById<SeekBar>(R.id.delayBar)
         val delayLabel = findViewById<TextView>(R.id.delayLabel)
@@ -277,8 +268,11 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refreshTargetsText(findViewById(R.id.targetsText))
         refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
-        // 启动/回到前台时静默检查一次更新（发现新版本才弹提示）
-        UpdateChecker.check(this, silent = true)
+        // 静默检查更新：发现新版本时不再弹窗，只把按钮文案改为「发现新版本…（点此更新）」
+        UpdateChecker.check(this, silent = true) { version ->
+            findViewById<Button>(R.id.btnCheckUpdate).text =
+                getString(R.string.update_available_fmt, version)
+        }
     }
 
     private fun launchCaptureAuth() {

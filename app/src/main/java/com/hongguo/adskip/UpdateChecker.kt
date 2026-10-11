@@ -47,16 +47,17 @@ object UpdateChecker {
     }
 
     /**
-     * 检查更新；发现新版本时弹出更新确认。
-     * silent=true 时不弹"已是最新"的提示（用于启动时自动检查）。
+     * 检查更新。
+     * showDialogWhenFound=false 且提供 onUpdateAvailable 时：发现新版本只回调（不弹窗），
+     * 由界面自行以非弹窗方式提示（如按钮文案）。
      */
-    fun check(ctx: Context, silent: Boolean) {
+    fun check(ctx: Context, silent: Boolean, onUpdateAvailable: ((String) -> Unit)? = null) {
         if (checking) return
         checking = true
         val base = baseUrl(ctx)
         if (base == null) {
             checking = false
-            if (!silent) toast(ctx, "上报地址无效，无法检查更新")
+            if (!silent && onUpdateAvailable == null) toast(ctx, "上报地址无效，无法检查更新")
             return
         }
         Thread {
@@ -76,6 +77,7 @@ object UpdateChecker {
             mainHandler.post {
                 checking = false
                 when {
+                    found && onUpdateAvailable != null -> onUpdateAvailable(remote!!)
                     found -> showUpdateDialog(ctx, remote!!, base)
                     !silent -> toast(ctx, "已是最新版本（$current）")
                 }
