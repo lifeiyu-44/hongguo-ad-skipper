@@ -281,11 +281,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshCaptureButton(btn: Button) {
+        btn.visibility = View.VISIBLE
         if (!ScreenCapture.needed()) {
-            btn.visibility = View.GONE
+            // Android 11+：系统免授权截图，无需任何设置
+            btn.text = getString(R.string.capture_not_needed)
+            btn.isEnabled = false
             return
         }
-        btn.visibility = View.VISIBLE
+        btn.isEnabled = true
         btn.text = getString(
             if (ScreenCapture.isReady) R.string.capture_ready_test else R.string.btn_capture_auth
         )
