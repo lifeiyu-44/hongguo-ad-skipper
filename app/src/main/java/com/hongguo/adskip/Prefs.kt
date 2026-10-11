@@ -9,6 +9,9 @@ object Prefs {
     /** 红果短剧（红果免费短剧）官方包名 */
     const val DEFAULT_TARGET = "com.phoenix.read"
 
+    /** 默认反馈上报地址：指向电脑端接收服务（可在设置中修改；留空则退回分享方式） */
+    const val DEFAULT_FEEDBACK_URL = "http://192.168.5.10:8765/report"
+
     private const val KEY_TARGETS = "target_packages"
     private const val KEY_AUTO = "auto_swipe"
     private const val KEY_OVERLAY = "overlay_status"
@@ -56,8 +59,9 @@ object Prefs {
     fun setFeedbackButtonEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean(KEY_FB_BTN, v).apply()
 
-    /** 反馈上报服务器地址（可选，留空则只用分享方式） */
-    fun getFeedbackUrl(ctx: Context): String = sp(ctx).getString(KEY_FB_URL, "") ?: ""
+    /** 反馈上报服务器地址：默认指向电脑端接收服务，可在设置中修改；留空则退回分享方式 */
+    fun getFeedbackUrl(ctx: Context): String =
+        sp(ctx).getString(KEY_FB_URL, DEFAULT_FEEDBACK_URL) ?: DEFAULT_FEEDBACK_URL
 
     fun setFeedbackUrl(ctx: Context, v: String) = sp(ctx).edit().putString(KEY_FB_URL, v).apply()
 

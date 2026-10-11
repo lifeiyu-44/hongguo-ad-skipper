@@ -791,18 +791,27 @@ class AdSkipService : AccessibilityService() {
             appendLog("反馈已生成：${txtFile.name}${if (imgFile != null) "（含截图）" else "（无截图）"}")
             val url = Prefs.getFeedbackUrl(this)
             if (url.isNotBlank()) {
-                // 配置了上报服务器：静默上传到电脑，不再弹出分享面板
-                Toast.makeText(this, "正在上传反馈到电脑…", Toast.LENGTH_SHORT).show()
+                // 配置了上报服务器：静默上传到电脑。
+                // 失败自动重试一次；无论如何都不弹出分享面板（零弹窗要求）
                 uploadReport(url, imgFile, txtFile) { ok ->
-                    Toast.makeText(
-                        this,
-                        if (ok) "反馈已提交到电脑 ✓" else "上传失败，改用分享方式",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    if (!ok) shareReport(imgFile, txtFile)
+                    if (ok) {
+                        Toast.makeText(this, "反馈已提交到电脑 ✓", Toast.LENGTH_SHORT).show()
+                    } else {
+                        appendLog("上传失败，10 秒后自动重试一次")
+                        mainHandler.postDelayed({
+                            uploadReport(url, imgFile, txtFile) { ok2 ->
+                                Toast.makeText(
+                                    this,
+                                    if (ok2) "反馈已提交到电脑 ✓"
+                                    else "上传失败：请确认手机与电脑连同一个 WiFi（反馈已保存在手机里）",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }, 10000L)
+                    }
                 }
             } else {
-                // 未配置服务器：打开分享面板（可发微信文件传输助手）
+                // 地址被手动清空时才使用分享方式
                 shareReport(imgFile, txtFile)
             }
         } catch (e: Exception) {
