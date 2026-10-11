@@ -7,6 +7,9 @@
     <!-- App 内升级：下载新版本后拉起系统安装界面 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- 屏幕捕捉（反馈截图）所需的前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
     <!-- 检测网络状态：断网时暂停自动跳过，避免误翻页 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -55,5 +58,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- 屏幕捕捉配套前台服务（Android 10+ 系统强制要求，否则截图授权失效） -->
+        <service
+            android:name=".CaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>

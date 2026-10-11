@@ -129,6 +129,12 @@ class AdSkipService : AccessibilityService() {
         fun clearLogs() {
             logs.value = emptyList()
         }
+
+        /** 供界面层写入运行日志（如截图授权结果），会一并出现在反馈报告中 */
+        fun appendLogExternal(msg: String) {
+            val line = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()) + "  " + msg
+            logs.value = (logs.value + line).takeLast(120)
+        }
     }
 
     /** IDLE=无广告 COUNTING=倒计时中 FALLBACK=有「广告」角标但无倒计时（兜底等待/重试） */

@@ -28,6 +28,7 @@
     <string name="capture_ready_test">屏幕截图已开启（点此测试）</string>
     <string name="capture_test_ok">截图功能正常 ✓ 反馈将自动带画面</string>
     <string name="capture_test_fail_fmt">截图失败：%1$s</string>
+    <string name="capture_start_fail_fmt">截图授权失败：%1$s（详情已记录，可在反馈日志中查看）</string>
     <string name="capture_guide_title">开启反馈截图（仅需一次）</string>
     <string name="capture_guide_msg">你的系统是 Android 10，需要开启一次屏幕截图授权，反馈才能自动附带当前画面。
 
@@ -62,5 +63,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.23 · 手机/平板通用</string>
+    <string name="version_label">版本 1.24 · 手机/平板通用</string>
 </resources>

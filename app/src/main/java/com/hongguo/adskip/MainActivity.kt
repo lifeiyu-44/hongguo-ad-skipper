@@ -3,6 +3,8 @@ package com.hongguo.adskip
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
@@ -12,6 +14,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -23,14 +26,41 @@ class MainActivity : AppCompatActivity() {
     // Android 11 以下的屏幕截图授权（MediaProjection，授权一次即可常驻）
     private val captureAuthLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val ok = result.resultCode == RESULT_OK && result.data != null &&
-                    ScreenCapture.start(this, result.resultCode, result.data!!)
-            Toast.makeText(
-                this,
-                if (ok) R.string.capture_auth_ok else R.string.capture_auth_cancel,
-                Toast.LENGTH_LONG
-            ).show()
-            refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                // Android 10+ 系统强制要求：先启动 mediaProjection 前台服务，再建立捕捉
+                try {
+                    ContextCompat.startForegroundService(
+                        this, Intent(this, CaptureService::class.java)
+                    )
+                } catch (_: Exception) {
+                }
+                val data = result.data!!
+                val resultCode = result.resultCode
+                Handler(Looper.getMainLooper()).postDelayed({
+                    val ok = ScreenCapture.start(this, resultCode, data)
+                    AdSkipService.appendLogExternal(
+                        "屏幕截图授权结果: " +
+                                if (ok) "成功，已就绪" else "失败：" + (ScreenCapture.lastError ?: "未知原因")
+                    )
+                    Toast.makeText(
+                        this,
+                        if (ok) {
+                            getString(R.string.capture_auth_ok)
+                        } else {
+                            getString(
+                                R.string.capture_start_fail_fmt,
+                                ScreenCapture.lastError ?: "未知原因"
+                            )
+                        },
+                        Toast.LENGTH_LONG
+                    ).show()
+                    refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
+                }, 500)
+            } else {
+                AdSkipService.appendLogExternal("屏幕截图授权被取消（未确认系统弹窗）")
+                Toast.makeText(this, R.string.capture_auth_cancel, Toast.LENGTH_LONG).show()
+                refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
