@@ -9,3 +9,7 @@ captures/
 
 # 本机构建工具链（JDK/Android SDK，约 1GB，不入库）
 .buildtools/
+
+# 反馈接收服务的接收目录（含用户截图与日志，不入库）
+receiver/reports/
+receiver/server.log
