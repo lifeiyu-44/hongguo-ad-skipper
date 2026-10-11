@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 联网权限：一键反馈上传到电脑的接收服务 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- 检测网络状态：断网时暂停自动跳过，避免误翻页 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -14,7 +17,8 @@
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.App">
+        android:theme="@style/Theme.App"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
