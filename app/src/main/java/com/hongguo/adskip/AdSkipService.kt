@@ -460,7 +460,7 @@ class AdSkipService : AccessibilityService() {
             if (!merged.mallPromoAd && f.mallPromoAd) merged.mallPromoAd = true
             merged.textNodeCount += f.textNodeCount
             if (merged.skipNode == null) merged.skipNode = f.skipNode
-            if (merged.backNode == null) merged.backNode = f.backNode
+            if (merged.backBounds == null) merged.backBounds = f.backBounds
         }
         return merged
     }
@@ -480,7 +480,7 @@ class AdSkipService : AccessibilityService() {
         var textNodeCount: Int = 0          // 屏幕内可读文字节点数（0=画面型广告特征）
         var mallPromoAd: Boolean = false    // 商城推广卡片广告特征（可读文字极少，含"商城好物省心选"）
         var skipNode: AccessibilityNodeInfo? = null
-        var backNode: AccessibilityNodeInfo? = null // 推广页左上角「返回」：上滑无效时的退出通道（仅广告波次内使用）
+        var backBounds: Rect? = null // 推广页左上角「返回」文字位置：上滑无效时按坐标点按退出
     }
 
     private fun findAdSignature(root: AccessibilityNodeInfo, nodeLimit: Int): ScanResult {
@@ -585,9 +585,12 @@ class AdSkipService : AccessibilityService() {
             }
             // 推广页（品牌直播等）的「返回」是唯一可靠出口：页面中部的直播画面与
             // 商品墙会吸收上滑手势，导致反复上滑翻不出页面。仅捕获精确的「返回」，
-            // 避免误抓普通页面的「返回首页」等；使用时机由广告决策层把关
-            if (result.backNode == null && ("返回" == text || "返回" == desc)) {
-                result.backNode = node.findClickableSelfOrParent()
+            // 避免误抓普通页面的「返回首页」等。#24 实测该按钮视图层级内无可点击
+            // 节点、ACTION_CLICK 全部失败，因此只记坐标，用点按手势触发
+            if (result.backBounds == null && ("返回" == text || "返回" == desc)) {
+                val r = Rect()
+                node.getBoundsInScreen(r)
+                if (!r.isEmpty) result.backBounds = r
             }
             collectChildren(node, queue)
         }
@@ -860,22 +863,19 @@ class AdSkipService : AccessibilityService() {
                 } else if (found.unlocked) {
                     // 无倒计时广告的解锁提示：立即上滑。已连滑 2 次仍没翻出去的
                     // （品牌直播等推广页会吸收上滑手势），改点页面自带的「返回」退出
-                    val exitNode = if (retryCount >= 2) (found.backNode ?: found.skipNode) else found.skipNode
-                    attemptSkip(
-                        exitNode,
-                        "检测到「${found.unlockText ?: "上滑继续观看"}」提示" +
-                                if (exitNode === found.backNode) "（上滑无效，点「返回」退出）" else "",
-                        countdownVisible = false
-                    )
+                    if (retryCount >= 2 && found.backBounds != null) {
+                        exitViaBack(found)
+                    } else {
+                        attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
+                    }
                 } else if (lockToastSeenAt == 0L && now >= deadlineAt) {
                     // 本次扫描已确认无倒计时文字，才执行兜底上滑。
                     // 若本波广告曾被红果明确拒绝（锁定期），一律不盲滑，避免反复顶撞提示
-                    val exitNode = if (retryCount >= 2) (found.backNode ?: found.skipNode) else found.skipNode
-                    attemptSkip(
-                        exitNode,
-                        if (exitNode === found.backNode) "上滑无效，点「返回」退出推广页" else "广告等待超时，尝试上滑",
-                        countdownVisible = false
-                    )
+                    if (retryCount >= 2 && found.backBounds != null) {
+                        exitViaBack(found)
+                    } else {
+                        attemptSkip(found.skipNode, "广告等待超时，尝试上滑", countdownVisible = false)
+                    }
                 }
             }
         }
@@ -983,6 +983,39 @@ class AdSkipService : AccessibilityService() {
         val n = skipCount.value + 1
         skipCount.value = n
         Prefs.setSkipCount(this, n)
+    }
+
+    /**
+     * 上滑多次无效后的推广页出口：按「返回」文字节点的屏幕坐标模拟手指点按。
+     * 不走 ACTION_CLICK——#24 实测该按钮视图层级内无可点击节点，点击动作全部失败；
+     * 坐标点按等同真人手指按下，最可靠。
+     */
+    private fun exitViaBack(found: ScanResult) {
+        val r = found.backBounds ?: return
+        retryCount++
+        cooldownUntil = SystemClock.elapsedRealtime() + AFTER_SWIPE_COOLDOWN_MS
+        val path = Path().apply {
+            moveTo(r.exactCenterX(), r.exactCenterY())
+            lineTo(r.exactCenterX(), r.exactCenterY())
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 60L))
+            .build()
+        val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                appendLog("已点击「返回」退出推广页 ✓（第 $retryCount 次尝试）")
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                appendLog("「返回」点按被系统取消（可能手指正触屏），稍后自动重试")
+            }
+        }, null)
+        if (!dispatched) appendLog("「返回」点按派发失败")
+        val n = skipCount.value + 1
+        skipCount.value = n
+        Prefs.setSkipCount(this, n)
+        deadlineAt = SystemClock.elapsedRealtime() + RETRY_GAP_MS
+        scheduleDeadlineKick(RETRY_GAP_MS)
     }
 
     private fun swipeUp(reason: String) {

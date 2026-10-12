@@ -25,6 +25,9 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
+    // 重装/升级后「无障碍已开启但服务未生效」的自动重绑：每次打开界面最多尝试一次
+    private var accessibilityFixTried = false
+
     // Android 11 以下的屏幕截图授权（MediaProjection，授权一次即可常驻）
     private val captureAuthLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -449,11 +452,54 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         refreshTargetsText(findViewById(R.id.targetsText))
         refreshCaptureButton(findViewById(R.id.btnCaptureAuth))
+        checkAccessibilityAlive()
         // 静默检查更新：发现新版本时不再弹窗，只把按钮文案改为「发现新版本…（点此更新）」
         UpdateChecker.check(this, silent = true) { version ->
             findViewById<Button>(R.id.btnCheckUpdate).text =
                 getString(R.string.update_available_fmt, version)
         }
+    }
+
+    /**
+     * 重装/升级后的常见故障：无障碍设置里显示「已开启」，但系统没有把服务重新绑定，
+     * 表现为一切识别停摆而用户毫无察觉。这里先尝试「组件开关」触发系统重连
+     * （不少 ROM 升级后不会自动重绑），4 秒后复查，仍不生效则提示手动开关一次。
+     */
+    private fun checkAccessibilityAlive() {
+        val enabled = Settings.Secure.getString(
+            contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        )?.contains(packageName) == true
+        if (!enabled || AdSkipService.running.value) return
+        if (accessibilityFixTried) return
+        accessibilityFixTried = true
+        AdSkipService.appendLogExternal("检测到无障碍已开启但服务未生效，尝试自动重绑…")
+        val comp = android.content.ComponentName(this, AdSkipService::class.java)
+        val pm = packageManager
+        runCatching {
+            pm.setComponentEnabledSetting(
+                comp,
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP
+            )
+            Handler(Looper.getMainLooper()).postDelayed({
+                runCatching {
+                    pm.setComponentEnabledSetting(
+                        comp,
+                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        android.content.pm.PackageManager.DONT_KILL_APP
+                    )
+                }
+            }, 250L)
+        }
+        Handler(Looper.getMainLooper()).postDelayed({
+            val stillEnabled = Settings.Secure.getString(
+                contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            )?.contains(packageName) == true
+            if (stillEnabled && !AdSkipService.running.value) {
+                AdSkipService.appendLogExternal("自动重绑未生效：请点「无障碍」按钮，把开关关掉再打开一次")
+                Toast.makeText(this, R.string.a11y_rebind_failed_hint, Toast.LENGTH_LONG).show()
+            }
+        }, 5000L)
     }
 
     private fun launchCaptureAuth() {
