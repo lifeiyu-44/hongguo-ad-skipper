@@ -210,31 +210,38 @@ function sendMail(to, subject, body) {
   });
 }
 
-function issueCode(email) {
-  const code = String(crypto.randomInt(100000, 1000000));
+/** 验证码有效期与最大尝试次数（放宽：输错几次不会立刻作废） */
+const CODE_TTL_MS = 15 * 60 * 1000;
+const CODE_MAX_ATTEMPTS = 10;
+
+function makeCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+function storeCode(email, code) {
   const hash = crypto.createHash('sha256').update(code).digest('hex');
   db.prepare(
     `INSERT INTO codes (email, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)
      ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash,
        expires_at = excluded.expires_at, attempts = 0`
-  ).run(email, hash, Date.now() + 10 * 60 * 1000);
-  return code;
+  ).run(email, hash, Date.now() + CODE_TTL_MS);
 }
 
+/** 校验验证码：返回 { ok, remaining }；remaining = 还可尝试次数 */
 function verifyCode(email, code) {
   const row = db.prepare('SELECT * FROM codes WHERE email = ?').get(email);
-  if (!row) return false;
-  if (row.attempts >= 5 || Date.now() > row.expires_at) {
+  if (!row) return { ok: false, remaining: 0 };
+  if (Date.now() > row.expires_at || row.attempts >= CODE_MAX_ATTEMPTS) {
     db.prepare('DELETE FROM codes WHERE email = ?').run(email);
-    return false;
+    return { ok: false, remaining: 0 };
   }
   const hash = crypto.createHash('sha256').update(String(code || '')).digest('hex');
   if (hash === row.code_hash) {
     db.prepare('DELETE FROM codes WHERE email = ?').run(email);
-    return true;
+    return { ok: true, remaining: 0 };
   }
   db.prepare('UPDATE codes SET attempts = attempts + 1 WHERE email = ?').run(email);
-  return false;
+  return { ok: false, remaining: Math.max(0, CODE_MAX_ATTEMPTS - row.attempts - 1) };
 }
 
 /* ---------------- 会话 ---------------- */
@@ -564,8 +571,14 @@ async function handle(req, res) {
         return;
       }
       try {
-        const code = issueCode(email);
-        await sendMail(email, '红果广告跳过 · 注册验证码', `您的验证码是：${code}\n\n10 分钟内有效。若非本人操作请忽略本邮件。`);
+        // 先发信成功、再落库：避免邮件没发出去却留下一个"幽灵验证码"
+        const code = makeCode();
+        await sendMail(
+          email,
+          '红果广告跳过 · 注册验证码',
+          `您的验证码是：${code}（6 位数字）\n\n15 分钟内有效，请勿转发给他人。若非本人操作，请忽略本邮件。`
+        );
+        storeCode(email, code);
         log('[邮件] 已发送注册验证码至', email);
         sendJson(res, 200, { ok: true });
       } catch (e) {
@@ -598,8 +611,9 @@ async function handle(req, res) {
         sendJson(res, 400, { ok: false, error: 'smtp_not_configured' });
         return;
       }
-      if (!verifyCode(email, String(body.code || ''))) {
-        sendJson(res, 400, { ok: false, error: 'bad_code' });
+      const vr = verifyCode(email, String(body.code || ''));
+      if (!vr.ok) {
+        sendJson(res, 400, { ok: false, error: 'bad_code', remaining: vr.remaining });
         return;
       }
       const salt = newSalt();

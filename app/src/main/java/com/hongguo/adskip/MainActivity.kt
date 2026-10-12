@@ -271,8 +271,16 @@ class MainActivity : AppCompatActivity() {
                                 Toast.LENGTH_LONG
                             ).show()
                         }
-                        result.error == "bad_code" ->
-                            Toast.makeText(this, R.string.account_bad_code, Toast.LENGTH_LONG).show()
+                        result.error == "bad_code" -> {
+                            // 输错后清空，提示只认最新一封邮件里的 6 位数字
+                            editAccCode.setText("")
+                            val msg = if (result.remaining in 1..99) {
+                                getString(R.string.account_bad_code_fmt, result.remaining)
+                            } else {
+                                getString(R.string.account_bad_code)
+                            }
+                            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                        }
                         result.error == "invalid" ->
                             Toast.makeText(this, R.string.account_need_code, Toast.LENGTH_LONG).show()
                         result.error == "smtp_not_configured" ->

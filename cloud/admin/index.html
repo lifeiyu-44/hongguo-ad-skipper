@@ -138,9 +138,10 @@
       <div id="p-overview"><div class="stats" id="stats"></div></div>
 
       <div id="p-reports" class="hidden">
-        <div class="row">
-          <input id="rq" class="grow" placeholder="搜索报告内容…">
+        <div class="row" style="margin-top:0">
+          <input id="rq" class="grow" placeholder="搜索报告内容（标题/正文摘要）…">
           <button class="primary" onclick="loadReports(1)">搜索</button>
+          <button class="ghost" onclick="$('rq').value='';loadReports(1)">重置</button>
         </div>
         <div class="table-wrap">
           <table id="rTable">
@@ -157,10 +158,25 @@
 
       <div id="p-versions" class="hidden">
         <h2>上传新版本</h2>
-        <div class="row tight"><input id="vVer" placeholder="版本号，如 1.35.2" style="width:180px"><input id="vNote" class="grow" placeholder="更新说明（可选）"></div>
-        <div class="row tight"><input type="file" id="vFile" accept=".apk" class="grow"></div>
-        <div class="row tight"><button class="primary" onclick="uploadVersion()">上传</button><span class="sub" id="vUp"></span></div>
-        <h2>版本列表</h2>
+        <div class="form-grid">
+          <label class="fld">
+            <span>版本号</span>
+            <input id="vVer" placeholder="如 1.35.6">
+          </label>
+          <label class="fld">
+            <span>更新说明</span>
+            <input id="vNote" placeholder="可选，显示在版本列表">
+          </label>
+          <label class="fld span2">
+            <span>APK 安装包</span>
+            <input type="file" id="vFile" accept=".apk">
+          </label>
+        </div>
+        <div class="row" style="margin-top:16px">
+          <button class="primary" onclick="uploadVersion()">上传</button>
+          <span class="sub" id="vUp"></span>
+        </div>
+        <h2 style="margin-top:28px">版本列表</h2>
         <div class="table-wrap">
           <table id="vTable">
             <thead><tr><th>版本</th><th>说明</th><th>大小</th><th>时间</th><th>状态</th><th></th></tr></thead>
@@ -177,11 +193,19 @@
             <tbody></tbody>
           </table>
         </div>
-        <h2>修改我的密码</h2>
-        <div class="row tight">
-          <input id="pOld" type="password" placeholder="当前密码" class="grow">
-          <input id="pNew" type="password" placeholder="新密码（至少8位）" class="grow">
-          <button class="primary" onclick="changePw()">修改</button>
+        <h2 style="margin-top:28px">修改我的密码</h2>
+        <div class="form-grid">
+          <label class="fld">
+            <span>当前密码</span>
+            <input id="pOld" type="password" autocomplete="current-password">
+          </label>
+          <label class="fld">
+            <span>新密码（至少 8 位）</span>
+            <input id="pNew" type="password" autocomplete="new-password">
+          </label>
+        </div>
+        <div class="row" style="margin-top:16px">
+          <button class="primary" onclick="changePw()">修改密码</button>
         </div>
       </div>
 
@@ -322,10 +346,21 @@ async function loadStats() {
   const r = await api('/api/admin/stats');
   if (!r.data.ok) return;
   const v = r.data.activeVersion;
+  let smtpCard = '';
+  try {
+    const s = await api('/api/admin/smtp');
+    if (s.data.ok) {
+      smtpCard = stat(
+        s.data.configured ? '已开启' : '未配置',
+        '邮箱验证码' + (s.data.configured ? '' : '<div class="sub">App 注册暂不可用</div>')
+      );
+    }
+  } catch (_) {}
   $('stats').innerHTML =
     stat(r.data.reports, '缺陷报告总数') + stat(r.data.todayReports, '今日新报告') +
     stat(r.data.users, '注册用户') +
-    stat(v ? 'v' + v.version : '—', '当前下发版本' + (v && v.note ? '<div class="sub">' + esc(v.note) + '</div>' : ''));
+    stat(v ? 'v' + v.version : '—', '当前下发版本' + (v && v.note ? '<div class="sub">' + esc(v.note) + '</div>' : '')) +
+    smtpCard;
 }
 function stat(big, label) { return '<div class="stat"><b>' + big + '</b><span class="sub">' + label + '</span></div>'; }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -343,7 +378,7 @@ async function loadReports(page) {
     '<td>' + fmtTime(x.created_at) + '</td>' +
     '<td>' + (x.app_version ? '<code class="k">v' + esc(x.app_version) + '</code>' : '<span class="sub">—</span>') + '</td>' +
     '<td class="sub">' + esc(x.ip) + (x.user_email ? '<br><span class="badge">' + esc(x.user_email) + '</span>' : '') + '</td>' +
-    '<td class="wrap-cell" title="' + esc(x.summary) + '">' + esc(x.summary) + '</td>' +
+    '<td class="wrap-cell" title="' + esc(x.summary) + '">' + (x.has_screenshot ? '<span class="badge">含截图</span> ' : '') + esc(x.summary) + '</td>' +
     '<td><button class="ghost" onclick="showDetail(' + x.id + ')">详情</button></td>' +
     '</tr>'
   ).join('') || '<tr><td colspan="5" class="sub" style="text-align:center;padding:24px">暂无报告</td></tr>';

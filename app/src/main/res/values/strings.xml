@@ -53,16 +53,17 @@
     <string name="account_hint">注册登录后，反馈报告自动关联你的邮箱；不注册也可正常使用全部功能</string>
     <string name="account_email_hint">邮箱</string>
     <string name="account_pass_hint">密码（至少8位）</string>
-    <string name="account_code_hint">验证码（新用户注册需要）</string>
+    <string name="account_code_hint">6 位数字验证码（只认最新一封邮件）</string>
     <string name="account_btn_send_code">发送验证码</string>
     <string name="account_btn_login">登录 / 注册</string>
     <string name="account_btn_logout">退出登录</string>
     <string name="account_logged_fmt">已登录：%1$s</string>
-    <string name="account_code_sent">验证码已发送，请查收邮箱</string>
+    <string name="account_code_sent">验证码已发送：请查收最新一封邮件里的 6 位数字（15 分钟内有效）</string>
     <string name="account_login_ok">登录成功 ✓ 反馈将关联你的邮箱</string>
     <string name="account_reg_ok">注册成功 ✓</string>
-    <string name="account_need_code">该邮箱未注册：请填写验证码后重试（新用户）</string>
-    <string name="account_bad_code">验证码错误或已过期</string>
+    <string name="account_need_code">该邮箱未注册：请点「发送验证码」，填入最新邮件里的 6 位数字后再试</string>
+    <string name="account_bad_code">验证码错误或已过期：请点「发送验证码」获取新验证码（只认最新一封邮件里的 6 位数字）</string>
+    <string name="account_bad_code_fmt">验证码错误（还可试 %1$d 次）；也可以点「发送验证码」重新获取</string>
     <string name="account_fail_fmt">失败：%1$s</string>
     <string name="account_logout_ok">已退出登录</string>
     <string name="update_available_fmt">发现新版本 %1$s（点此更新）</string>
@@ -89,5 +90,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.35.5 · 手机/平板通用 · 云端上报</string>
+    <string name="version_label">版本 1.35.6 · 手机/平板通用 · 云端上报</string>
 </resources>

@@ -12,7 +12,13 @@ import java.net.URL
  */
 object AccountApi {
 
-    data class Result(val ok: Boolean, val token: String? = null, val error: String? = null)
+    data class Result(
+        val ok: Boolean,
+        val token: String? = null,
+        val error: String? = null,
+        /** bad_code 时的剩余可试次数（-1=未知） */
+        val remaining: Int = -1,
+    )
 
     /** 从上报地址推导服务根地址（与更新检查同一规则） */
     private fun baseUrl(ctx: Context): String? {
@@ -59,7 +65,11 @@ object AccountApi {
             conn.disconnect()
             val json = try { JSONObject(text) } catch (_: Exception) { JSONObject() }
             if (json.optBoolean("ok")) Result(true, token = json.optString("token").ifBlank { null })
-            else Result(false, error = json.optString("error").ifBlank { "http_$code" })
+            else Result(
+                false,
+                error = json.optString("error").ifBlank { "http_$code" },
+                remaining = if (json.has("remaining")) json.optInt("remaining") else -1,
+            )
         } catch (e: Exception) {
             Result(false, error = e.message ?: "network_error")
         }
