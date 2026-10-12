@@ -63,6 +63,16 @@ class AdSkipService : AccessibilityService() {
         val SKIP_WITH_COUNTDOWN_REGEX = Regex("""跳过[^0-9]{0,4}\d+""")
 
         /**
+         * 倒计时尾部文案（不含数字），用于「数字与文案被渲染成两个独立节点」的广告布局。
+         * 例：数字节点「5s」+ 文案节点「后可继续上滑观看」/「秒后可继续上滑观看短剧」。
+         * 与数字节点就近配对成功后即可得到真实剩余秒数。
+         */
+        val COUNTDOWN_TAIL_REGEX = Regex("""^(?:[秒sS]\s*)?后[^0-9]{0,12}?(上滑|滑动|继续|观看|跳过|关闭|自动|播放|进入|下一集|解锁|可滑)""")
+
+        /** 纯数字节点（拆分布局中倒计时秒数单独成节点，如「5」「5s」） */
+        val COUNTDOWN_NUMBER_REGEX = Regex("""^\s*(\d{1,3})\s*[sS秒]?\s*$""")
+
+        /**
          * 「上滑继续观看短剧」「上滑观看下一集」等无数字的解锁提示：
          * 红果在广告可跳过时显示，出现即说明现在就能上滑（无倒计时广告的可靠信号）。
          * 必须以「上滑」开头：锁定期文案「N秒后可继续上滑观看短剧」也含「上滑观看」，
@@ -176,6 +186,7 @@ class AdSkipService : AccessibilityService() {
     private var fallbackSinceAt = 0L       // 本波广告兜底流程的开始时间（总时长上限用）
     private var retryCount = 0             // 当前这波广告已尝试次数
     private var lockToastSeenAt = 0L       // 本波广告见到「倒计时结束后才可滑动」的时间（0=未见）
+    private var countingUnknownSec = false // 当前倒计时为「拆分布局且秒数未知」：只能等文案消失后上滑
     private var probeTick = 0
     private var offlineLogged = false      // 断网提示只记一次，避免日志刷屏
     private var lastScan: ScanResult? = null          // 最近一轮扫描结果（反馈用）
@@ -441,6 +452,7 @@ class AdSkipService : AccessibilityService() {
     private class ScanResult {
         var countdownSec: Int = -1
         var countdownText: String? = null   // 触发倒计时识别的原始文字（诊断用）
+        var countdownUnknown: Boolean = false // 只匹配到倒计时尾部文案（数字拆到别的节点且未配对到）：锁定但剩余秒数未知
         var adChip: Boolean = false
         var adChipText: String? = null      // 触发角标识别的原始文字（诊断用）
         var unlocked: Boolean = false
@@ -471,11 +483,15 @@ class AdSkipService : AccessibilityService() {
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var visited = 0
+        // 拆分布局配对用：倒计时剩余秒数节点 + 尾部文案节点（见下方组装逻辑）
+        val numberCandidates = ArrayList<Pair<Int, Rect>>()
+        var tailBounds: Rect? = null
         while (queue.isNotEmpty() && visited < nodeLimit) {
             val node = queue.removeFirst()
             visited++
-            val text = node.text?.toString()
-            val desc = node.contentDescription?.toString()
+            // 归一化特殊空白/全角字符，避免"显示一样却匹配不上"
+            val text = normalizeText(node.text?.toString())
+            val desc = normalizeText(node.contentDescription?.toString())
 
             if (text == null && desc == null) {
                 collectChildren(node, queue)
@@ -502,6 +518,26 @@ class AdSkipService : AccessibilityService() {
                 if (result.countdownSec < 0 && desc != null) {
                     result.countdownSec = matchCountdown(desc)
                     if (result.countdownSec >= 0) result.countdownText = desc.take(24)
+                }
+            }
+            // 拆分布局采集：纯数字节点（「5」「5s」）与倒计时尾部文案节点（「后可继续上滑观看」）
+            if (numberCandidates.size < 4 && text != null) {
+                val nm = COUNTDOWN_NUMBER_REGEX.find(text)
+                if (nm != null) {
+                    val v = nm.groupValues[1].toIntOrNull()
+                    if (v != null && v in 0..90) {
+                        val r = Rect()
+                        node.getBoundsInScreen(r)
+                        numberCandidates.add(v to r)
+                    }
+                }
+            }
+            if (tailBounds == null) {
+                val cand = text ?: desc
+                if (cand != null && cand.length <= 16 && COUNTDOWN_TAIL_REGEX.containsMatchIn(cand)) {
+                    val r = Rect()
+                    node.getBoundsInScreen(r)
+                    tailBounds = r
                 }
             }
             if (!result.adChip && (isAdLabel(text) || isAdLabel(desc))) {
@@ -532,6 +568,33 @@ class AdSkipService : AccessibilityService() {
                 result.skipNode = node.findClickableSelfOrParent()
             }
             collectChildren(node, queue)
+        }
+        // 组装：单节点都匹配不到时，把「数字节点 + 尾部文案节点」就近配对还原倒计时。
+        // 仅在广告上下文（右上角角标/推广特征）内启用，避免剧集列表等页面的
+        // 「数字 + 后…继续」文字被误组装成倒计时
+        if (result.countdownSec < 0 && tailBounds != null &&
+            (result.adChip || result.promoAd || result.mallPromoAd)
+        ) {
+            val tb = tailBounds!!
+            var bestVal = -1
+            var bestDist = Int.MAX_VALUE
+            for ((v, r) in numberCandidates) {
+                // 同一行的相邻控件：纵向几乎对齐、横向距离有限
+                val dy = kotlin.math.abs(r.centerY() - tb.centerY())
+                val dx = kotlin.math.abs(r.centerX() - tb.centerX())
+                if (dy <= 90 && dx <= 900 && dx + dy < bestDist) {
+                    bestDist = dx + dy
+                    bestVal = v
+                }
+            }
+            if (bestVal >= 0) {
+                result.countdownSec = bestVal
+                result.countdownText = "组装:$bestVal"
+            } else {
+                // 只读到尾部文案、配不到数字：仍然是在锁定期，但剩余秒数未知
+                result.countdownUnknown = true
+                result.countdownText = "尾部文案(秒数未知)"
+            }
         }
         return result
     }
@@ -601,7 +664,7 @@ class AdSkipService : AccessibilityService() {
             }
         }
 
-        val hasCountdown = found.countdownSec >= 0
+        val hasCountdown = found.countdownSec >= 0 || found.countdownUnknown
         // 广告上下文：右上角「广告」角标，或推广类广告特征
         // （直播购物：直播中/讲解中/已售N件；游戏广告：点击进入游戏 等）
         val adContext = found.adChip || found.promoAd
@@ -709,11 +772,13 @@ class AdSkipService : AccessibilityService() {
                 if (hasCountdown) {
                     // 铁律：倒计时文字在屏幕上 = 只等待，绝不做任何动作
                     lastCountdownSeenAt = now
-                    val candidate = computeDeadline(now, found.countdownSec)
-                    if (now >= deadlineAt || candidate < deadlineAt) {
-                        // 到点但文字仍在 = 计时偏早，以屏幕上的最新秒数顺延
-                        deadlineAt = minOf(candidate, hardDeadlineAt)
-                        scheduleDeadlineKick(deadlineAt - now)
+                    if (!countingUnknownSec) {
+                        val candidate = computeDeadline(now, found.countdownSec)
+                        if (now >= deadlineAt || candidate < deadlineAt) {
+                            // 到点但文字仍在 = 计时偏早，以屏幕上的最新秒数顺延
+                            deadlineAt = minOf(candidate, hardDeadlineAt)
+                            scheduleDeadlineKick(deadlineAt - now)
+                        }
                     }
                     if (now >= hardDeadlineAt) {
                         // 文字疑似卡死不动：硬超时兜底（唯一允许文字仍在时动作的情况）
@@ -723,14 +788,17 @@ class AdSkipService : AccessibilityService() {
                     // 倒计时文字已消失 + 红果给出「上滑继续观看」提示：立即上滑
                     attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
                 } else if (adContext || now - lastCountdownSeenAt <= AD_GONE_GRACE_MS) {
-                    // 倒计时文字已从屏幕消失 = 倒计时结束，按自身计时尽快上滑
-                    if (now >= deadlineAt) {
+                    // 倒计时文字已从屏幕消失 = 倒计时结束，按自身计时尽快上滑。
+                    // 秒数未知的拆分布局：以文字消失为准立即上滑（延后 0.8s 防闪断误判）
+                    val effectiveDeadline =
+                        if (countingUnknownSec) maxOf(now, lastCountdownSeenAt + 800L) else deadlineAt
+                    if (now >= effectiveDeadline) {
                         if (lockToastSeenAt == 0L) {
                             attemptSkip(found.skipNode, "倒计时结束", countdownVisible = false)
                         }
                         // 本波曾被红果拒绝过：不再盲翻，等「上滑继续观看」提示或广告结束
                     } else {
-                        scheduleDeadlineKick(deadlineAt - now)
+                        scheduleDeadlineKick(effectiveDeadline - now)
                     }
                 } else {
                     // 倒计时和角标都不在且已超过宽限期：多半是用户自己划走了
@@ -767,22 +835,34 @@ class AdSkipService : AccessibilityService() {
     private fun enterCounting(now: Long, found: ScanResult) {
         val first = mode != Mode.COUNTING
         mode = Mode.COUNTING
-        deadlineAt = computeDeadline(now, found.countdownSec)
+        countingUnknownSec = found.countdownUnknown && found.countdownSec < 0
+        // 秒数未知时用 30s 作为调度估值；实际翻页以「文案从屏幕消失」为准（见 COUNTING 分支）
+        val sec = if (countingUnknownSec) 30 else found.countdownSec
+        deadlineAt = computeDeadline(now, sec)
         // 硬超时兜底：即使提示文字卡死不动，最多再多等 15 秒也强制执行
-        hardDeadlineAt = now + (found.countdownSec + 15) * 1000L + Prefs.getExtraDelayMs(this)
+        hardDeadlineAt = now + (sec + 15) * 1000L + Prefs.getExtraDelayMs(this)
         lastCountdownSeenAt = now
         unlockSinceAt = 0L
         scheduleDeadlineKick(deadlineAt - now)
         if (first) {
-            appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
+            if (countingUnknownSec) {
+                appendLog("识别到广告倒计时（拆分布局，剩余秒数未知），等提示文字消失后上滑")
+            } else {
+                appendLog("识别到广告，倒计时 ${found.countdownSec}s（触发文字：${found.countdownText ?: "?"}）")
+            }
         }
     }
 
     private fun publishAfterDecision(now: Long) {
         when (mode) {
             Mode.COUNTING -> {
-                val remain = ((deadlineAt - now) / 1000L).toInt() + 1
-                publishState(State.AD_COUNTDOWN, remain)
+                if (countingUnknownSec) {
+                    // 秒数未知：不显示具体倒计时数字，按"稍后自动上滑"提示
+                    publishState(State.AD_FALLBACK, -1)
+                } else {
+                    val remain = ((deadlineAt - now) / 1000L).toInt() + 1
+                    publishState(State.AD_COUNTDOWN, remain)
+                }
             }
             Mode.FALLBACK -> {
                 publishState(State.AD_FALLBACK, -1)
@@ -1213,6 +1293,7 @@ class AdSkipService : AccessibilityService() {
         unlockSinceAt = 0L
         emptySinceAt = 0L
         lockToastSeenAt = 0L
+        countingUnknownSec = false
     }
 
     // ------------------------------------------------------------------ 文字特征
@@ -1227,6 +1308,29 @@ class AdSkipService : AccessibilityService() {
             if (sec in 0..90) return sec
         }
         return -1
+    }
+
+    /**
+     * 文案归一化：全角数字/字母、各类 Unicode 空格（含不换行空格 U+00A0）、繁体「後」
+     * 统一成常规字符后再匹配。广告 SDK 的排版常混用这些字符，正则里的 \s 与 ASCII
+     * 数字无法覆盖，会导致倒计时文案"看起来一样却匹配不上"。
+     */
+    private fun normalizeText(s: String?): String? {
+        if (s == null) return null
+        var changed = false
+        val sb = StringBuilder(s.length)
+        for (ch in s) {
+            when {
+                ch in '０'..'９' -> { sb.append('0' + (ch - '０')); changed = true }
+                ch == 'ｓ' -> { sb.append('s'); changed = true }
+                ch == 'Ｓ' -> { sb.append('S'); changed = true }
+                ch == '後' -> { sb.append('后'); changed = true }
+                ch == '\u00A0' || ch == '\u3000' || ch.code == 0x202F || ch.code == 0x205F ||
+                        ch.code in 0x2000..0x200A -> { sb.append(' '); changed = true }
+                else -> sb.append(ch)
+            }
+        }
+        return if (changed) sb.toString() else s
     }
 
     private fun isAdLabel(s: String?): Boolean {
