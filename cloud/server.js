@@ -45,6 +45,8 @@ const SESSION_DAYS = 30;
 const REPORT_MAX_BYTES = 30 * 1024 * 1024; // 与 PC 版一致
 const JSON_MAX_BYTES = 64 * 1024;
 const APK_MAX_BYTES = 220 * 1024 * 1024;
+// HexMate 统计库（含逐场记录）按多年累计预留：8MB
+const HM_MAX_BYTES = 8 * 1024 * 1024;
 
 /* ---------------- 基础工具 ---------------- */
 
@@ -160,6 +162,11 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hm_stats (
+  bucket TEXT PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `);
 // 旧库升级：reports 增加账号列（App 登录后上报可关联）
 try { db.exec('ALTER TABLE reports ADD COLUMN user_email TEXT'); } catch (_) {}
@@ -172,6 +179,23 @@ function getApiKey() {
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_key', ?)").run(key);
   log('[初始化] 已生成机器 API Key（可用 /api/admin/apikey 查看）');
   return key;
+}
+
+/** HexMate 云同步密钥（X-Hm-Key 请求头）：授权 /api/hm/stats/*，首次启动自动生成 */
+function getHmKey() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'hm_key'").get();
+  if (row && row.value) return row.value;
+  const key = 'hmk_' + crypto.randomBytes(24).toString('hex');
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('hm_key', ?)").run(key);
+  log('[初始化] 已生成 HexMate 同步密钥（可用 /api/admin/hmkey 查看）');
+  return key;
+}
+
+/** HexMate 存储接口鉴权：X-Hm-Key，或 admin 会话 / X-Api-Key（运维直查用） */
+function canHmStore(req) {
+  const key = String(req.headers['x-hm-key'] || '');
+  if (key && key === getHmKey()) return true;
+  return canPublish(req);
 }
 
 /** 版本接口的鉴权：admin 会话 或 X-Api-Key */
@@ -682,6 +706,53 @@ async function handle(req, res) {
     }
   }
 
+  /* ---- HexMate 云存储（X-Hm-Key / admin / X-Api-Key） ---- */
+
+  if (pathname.startsWith('/api/hm/stats/')) {
+    if (!canHmStore(req)) { sendJson(res, 401, { ok: false, error: 'unauthorized' }); return; }
+    const bucket = pathname.slice('/api/hm/stats/'.length);
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(bucket)) {
+      sendJson(res, 400, { ok: false, error: 'bad_bucket' });
+      return;
+    }
+    if (req.method === 'GET') {
+      const row = db.prepare('SELECT data, updated_at FROM hm_stats WHERE bucket = ?').get(bucket);
+      if (!row) { sendJson(res, 404, { ok: false, error: 'not_found' }); return; }
+      let data;
+      try { data = JSON.parse(row.data); } catch (_) { data = null; }
+      sendJson(res, 200, { ok: true, bucket, updated_at: row.updated_at, data });
+      return;
+    }
+    if (req.method === 'PUT') {
+      let body;
+      try {
+        const buf = await readBody(req, HM_MAX_BYTES);
+        body = JSON.parse(buf.toString('utf8'));
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: e && e.message === 'body_too_large' ? 'too_large' : 'bad_json' });
+        return;
+      }
+      if (!body || typeof body !== 'object' || body.data === undefined) {
+        sendJson(res, 400, { ok: false, error: 'bad_body' });
+        return;
+      }
+      const updatedAt = Number(body.updated_at) || Date.now();
+      const text = JSON.stringify(body.data);
+      if (Buffer.byteLength(text, 'utf8') > HM_MAX_BYTES) {
+        sendJson(res, 413, { ok: false, error: 'too_large' });
+        return;
+      }
+      db.prepare(`
+        INSERT INTO hm_stats (bucket, data, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(bucket) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
+      `).run(bucket, text, updatedAt);
+      sendJson(res, 200, { ok: true, bucket, updated_at: updatedAt, bytes: Buffer.byteLength(text, 'utf8') });
+      return;
+    }
+    sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
+    return;
+  }
+
   /* ---- 管理接口（admin 角色） ---- */
 
   if (pathname.startsWith('/api/admin/')) {
@@ -906,6 +977,19 @@ async function handle(req, res) {
       const key = 'hgk_' + crypto.randomBytes(24).toString('hex');
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_key', ?)").run(key);
       log('[管理] API Key 已轮换');
+      sendJson(res, 200, { ok: true, key });
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/admin/hmkey') {
+      sendJson(res, 200, { ok: true, key: getHmKey() });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/hmkey/rotate') {
+      const key = 'hmk_' + crypto.randomBytes(24).toString('hex');
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('hm_key', ?)").run(key);
+      log('[管理] HexMate 同步密钥已轮换（旧客户端会开始报 401）');
       sendJson(res, 200, { ok: true, key });
       return;
     }
