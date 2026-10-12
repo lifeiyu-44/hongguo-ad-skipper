@@ -50,13 +50,17 @@ class AdSkipService : AccessibilityService() {
          *   平板端「3秒后可继续上滑观看短剧」、手机端「5s 后可继续上滑观看」（拉丁字母 s）。
          * 若红果短剧更新后文案变化导致识别失效，改这一行即可。
          */
-        val COUNTDOWN_REGEX = Regex("""(\d+)\s*[秒sS]\s*后[^0-9]{0,10}?(上滑|滑动|继续|观看)""")
+        val COUNTDOWN_REGEX = Regex("""(\d+)\s*[秒sS]\s*后[^0-9]{0,12}?(上滑|滑动|继续|观看|跳过|关闭|自动|播放|进入|下一集|解锁|可滑)""")
 
-        /** 「广告」角标上带单位的剩余秒数（备用特征），如「广告 15s」 */
-        val CHIP_COUNTDOWN_REGEX = Regex("""广告\s*(\d{1,3})\s*[sS秒](?![a-zA-Z])""")
+        /**
+         * 「广告」角标上的剩余秒数（备用特征）。两种写法都要认：
+         * 带单位「广告 15s」、不带单位「广告 15」（部分横屏/竖屏视频广告只显示纯数字）。
+         * 严格限定整段文字形态与数值上限（≤90），避免把「广告 100 元」等误判成秒数。
+         */
+        val CHIP_COUNTDOWN_REGEX = Regex("""广告\s*(\d{1,3})\s*[sS秒]?(?![a-zA-Z0-9])\s*$""")
 
-        /** 「跳过 5」这类带倒数数字的跳过按钮：数字未归零前不可用，不点击 */
-        val SKIP_WITH_COUNTDOWN_REGEX = Regex("""跳过\s*\d+""")
+        /** 「跳过 5」「跳过广告 5」这类带倒数数字的跳过按钮：数字未归零前不可用，不点击 */
+        val SKIP_WITH_COUNTDOWN_REGEX = Regex("""跳过[^0-9]{0,4}\d+""")
 
         /**
          * 「上滑继续观看短剧」「上滑观看下一集」等无数字的解锁提示：
@@ -92,7 +96,7 @@ class AdSkipService : AccessibilityService() {
         private const val UNLOCK_BLINK_GRACE_MS = 900L    // 提示闪断宽限：间隔多久内重新出现仍算连续
         private const val MAX_ATTEMPTS = 8                // 同一波广告最多尝试次数（覆盖被锁定期拒绝后的重试）
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
-        private const val LOCKED_BACKOFF_MS = 1500L       // 红果提示锁定期时的顺延时长
+        private const val LOCKED_WAVE_LIMIT_MS = 25000L   // 锁定期广告等待正向信号的上限，超时复位重新判定
         private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
         // ---- 画面型广告兜底（可选功能，默认开启）----
         private const val EMPTY_TREE_CONFIRM_MS = 5000L   // 屏幕几乎读不到文字持续多久判定为画面型广告
@@ -171,6 +175,7 @@ class AdSkipService : AccessibilityService() {
     private var lastAdSeenAt = 0L          // 最近一次见到广告特征的时间（闪断宽限判定用）
     private var fallbackSinceAt = 0L       // 本波广告兜底流程的开始时间（总时长上限用）
     private var retryCount = 0             // 当前这波广告已尝试次数
+    private var lockToastSeenAt = 0L       // 本波广告见到「倒计时结束后才可滑动」的时间（0=未见）
     private var probeTick = 0
     private var offlineLogged = false      // 断网提示只记一次，避免日志刷屏
     private var lastScan: ScanResult? = null          // 最近一轮扫描结果（反馈用）
@@ -450,9 +455,18 @@ class AdSkipService : AccessibilityService() {
     }
 
     private fun findAdSignature(root: AccessibilityNodeInfo, nodeLimit: Int): ScanResult {
-        val dm = resources.displayMetrics
-        val screenW = dm.widthPixels
-        val screenH = dm.heightPixels
+        // 可视范围以「窗口根节点的实际边界」为准：横屏旋转或视频窗口模式下
+        // displayMetrics 可能滞后/与真实窗口不一致，导致倒计时文字被误判为
+        // 屏幕外而漏检——漏检就会走兜底盲翻，触发红果锁定期提示
+        val frame = Rect()
+        try {
+            root.getBoundsInScreen(frame)
+        } catch (_: Exception) {
+        }
+        if (frame.isEmpty || frame.width() <= 0 || frame.height() <= 0) {
+            val dm = resources.displayMetrics
+            frame.set(0, 0, dm.widthPixels, dm.heightPixels)
+        }
         val result = ScanResult()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
@@ -470,7 +484,7 @@ class AdSkipService : AccessibilityService() {
             // 铁律：只认屏幕上真实可见的节点。
             // 翻页容器里刚滑过去的页面仍留在视图树中（屏幕外），
             // 不过滤会把上一页的广告当成当前页的广告，造成连翻多页
-            if (!isVisibleOnScreen(node, screenW, screenH)) {
+            if (!isVisibleOnScreen(node, frame)) {
                 collectChildren(node, queue)
                 continue
             }
@@ -493,7 +507,7 @@ class AdSkipService : AccessibilityService() {
             if (!result.adChip && (isAdLabel(text) || isAdLabel(desc))) {
                 // 只有屏幕右上角的「广告」角标才算插播广告；
                 // 首页推荐卡片、活动页中间的「广告」字样一律忽略，防止误判
-                if (isInAdChipCorner(node, screenW, screenH)) {
+                if (isInAdChipCorner(node, frame)) {
                     result.adChip = true
                     result.adChipText = (text ?: desc)?.take(16)
                 }
@@ -528,22 +542,21 @@ class AdSkipService : AccessibilityService() {
         }
     }
 
-    /** 节点中心点是否落在屏幕范围内（屏幕外的翻页残留节点一律无视） */
-    private fun isVisibleOnScreen(node: AccessibilityNodeInfo, screenW: Int, screenH: Int): Boolean {
+    /** 节点中心点是否落在窗口可视范围内（屏幕外的翻页残留节点一律无视） */
+    private fun isVisibleOnScreen(node: AccessibilityNodeInfo, frame: Rect): Boolean {
         val r = Rect()
         node.getBoundsInScreen(r)
         if (r.isEmpty) return false
-        if (r.right <= 0 || r.bottom <= 0 || r.left >= screenW || r.top >= screenH) return false
-        return r.centerX() in 0 until screenW && r.centerY() in 0 until screenH
+        return frame.contains(r.centerX(), r.centerY())
     }
 
-    /** 插播广告的「广告」角标固定在屏幕右上角区域（顶部 30%、右半屏） */
-    private fun isInAdChipCorner(node: AccessibilityNodeInfo, screenW: Int, screenH: Int): Boolean {
-        if (screenW <= 0 || screenH <= 0) return true
+    /** 插播广告的「广告」角标固定在窗口右上角区域（顶部 30%、右半屏） */
+    private fun isInAdChipCorner(node: AccessibilityNodeInfo, frame: Rect): Boolean {
+        if (frame.width() <= 0 || frame.height() <= 0) return true
         val r = Rect()
         node.getBoundsInScreen(r)
         if (r.isEmpty) return false
-        return r.top <= screenH * 0.30f && r.left >= screenW * 0.50f
+        return r.top <= frame.top + frame.height() * 0.30f && r.left >= frame.left + frame.width() * 0.50f
     }
 
     // ------------------------------------------------------------------ 广告决策
@@ -619,20 +632,21 @@ class AdSkipService : AccessibilityService() {
 
         // 红果提示「倒计时结束后即可滑动」= 仍在锁定期。
         // 屏幕上还有倒计时文字时：说明倒计时正在走，忽略该提示、按倒计时正常等待；
-        // 没有倒计时文字时才把它当作退避信号，顺延而不是顶着提示硬滑
+        // 没有倒计时文字时才把它当作「本波广告锁定」的证据：
+        // 一旦被红果明确拒绝过，本波广告就不再做任何盲翻（否则会反复触发红果提示），
+        // 只等正向信号——「上滑继续观看短剧」提示出现（可滑动）/「跳过」按钮可用/广告自然结束
         if (found.lockedToast && !hasCountdown) {
             if (mode == Mode.IDLE) {
                 mode = Mode.FALLBACK
                 if (fallbackSinceAt == 0L) fallbackSinceAt = now
-                appendLog("红果提示仍在锁定期（倒计时结束后才可滑动），顺延自动上滑")
+                appendLog("红果提示仍在锁定期（倒计时结束后才可滑动），停止盲翻，等待可滑动信号")
             }
-            // 被拒次数越多退避越长（1.5s → 3s → 4.5s … 上限 6s），
-            // 即使遇到完全未知的锁定期广告也不会反复顶撞弹出拒绝提示
-            val backoff = (LOCKED_BACKOFF_MS * maxOf(1, retryCount)).coerceAtMost(6000L)
-            deadlineAt = maxOf(deadlineAt, now + backoff)
-            scheduleDeadlineKick(deadlineAt - now)
-            publishAfterDecision(now)
-            return
+            lockToastSeenAt = now
+            // 锁定期内不动作；唯一例外是同时出现了明确的可滑动信号（解锁提示），继续走后续判定
+            if (!found.unlocked) {
+                publishAfterDecision(now)
+                return
+            }
         }
 
         // 这波广告尝试太多次仍未翻过去：放弃，等广告自然结束，避免反复滑动干扰
@@ -705,10 +719,16 @@ class AdSkipService : AccessibilityService() {
                         // 文字疑似卡死不动：硬超时兜底（唯一允许文字仍在时动作的情况）
                         attemptSkip(found.skipNode, "倒计时硬超时", countdownVisible = true)
                     }
+                } else if (found.unlocked) {
+                    // 倒计时文字已消失 + 红果给出「上滑继续观看」提示：立即上滑
+                    attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
                 } else if (adContext || now - lastCountdownSeenAt <= AD_GONE_GRACE_MS) {
                     // 倒计时文字已从屏幕消失 = 倒计时结束，按自身计时尽快上滑
                     if (now >= deadlineAt) {
-                        attemptSkip(found.skipNode, "倒计时结束", countdownVisible = false)
+                        if (lockToastSeenAt == 0L) {
+                            attemptSkip(found.skipNode, "倒计时结束", countdownVisible = false)
+                        }
+                        // 本波曾被红果拒绝过：不再盲翻，等「上滑继续观看」提示或广告结束
                     } else {
                         scheduleDeadlineKick(deadlineAt - now)
                     }
@@ -722,13 +742,19 @@ class AdSkipService : AccessibilityService() {
                 if (hasCountdown) {
                     // 兜底等待期间屏幕上出现了倒计时：切回倒计时模式，结束前不动作
                     enterCounting(now, found)
-                } else if (now - fallbackSinceAt > FALLBACK_TOTAL_LIMIT_MS) {
-                    resetToIdle("本波广告自动跳过超时（45s），已暂停，等广告自然结束")
+                } else if (now - fallbackSinceAt >
+                    (if (lockToastSeenAt != 0L) LOCKED_WAVE_LIMIT_MS else FALLBACK_TOTAL_LIMIT_MS)
+                ) {
+                    resetToIdle(
+                        if (lockToastSeenAt != 0L) "锁定期广告等待可滑动信号超时（25s），已暂停，等广告自然结束"
+                        else "本波广告自动跳过超时（45s），已暂停，等广告自然结束"
+                    )
                 } else if (found.unlocked) {
                     // 无倒计时广告的解锁提示：立即上滑
                     attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
-                } else if (now >= deadlineAt) {
-                    // 本次扫描已确认无倒计时文字，才执行兜底上滑
+                } else if (lockToastSeenAt == 0L && now >= deadlineAt) {
+                    // 本次扫描已确认无倒计时文字，才执行兜底上滑。
+                    // 若本波广告曾被红果明确拒绝（锁定期），一律不盲滑，避免反复顶撞提示
                     attemptSkip(found.skipNode, "广告等待超时，尝试上滑", countdownVisible = false)
                 }
             }
@@ -1106,6 +1132,15 @@ class AdSkipService : AccessibilityService() {
             }
             if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
             for (r in roots) {
+                // 可视范围同样以窗口根节点边界为准（与广告扫描保持一致）
+                val frame = android.graphics.Rect()
+                try {
+                    r.getBoundsInScreen(frame)
+                } catch (_: Exception) {
+                }
+                if (frame.isEmpty || frame.width() <= 0 || frame.height() <= 0) {
+                    frame.set(0, 0, w, h)
+                }
                 val queue = ArrayDeque<AccessibilityNodeInfo>()
                 queue.add(r)
                 var visited = 0
@@ -1113,7 +1148,7 @@ class AdSkipService : AccessibilityService() {
                     val n = queue.removeFirst()
                     visited++
                     val t = n.text?.toString() ?: n.contentDescription?.toString()
-                    if (!t.isNullOrBlank() && t.length <= 24 && isVisibleOnScreen(n, w, h)) {
+                    if (!t.isNullOrBlank() && t.length <= 24 && isVisibleOnScreen(n, frame)) {
                         out.add(t)
                     }
                     for (i in 0 until n.childCount) {
@@ -1177,13 +1212,20 @@ class AdSkipService : AccessibilityService() {
         chipFirstSeenAt = 0L
         unlockSinceAt = 0L
         emptySinceAt = 0L
+        lockToastSeenAt = 0L
     }
 
     // ------------------------------------------------------------------ 文字特征
 
     private fun matchCountdown(s: String): Int {
-        COUNTDOWN_REGEX.find(s)?.let { return it.groupValues[1].toIntOrNull() ?: -1 }
-        CHIP_COUNTDOWN_REGEX.find(s)?.let { return it.groupValues[1].toIntOrNull() ?: -1 }
+        COUNTDOWN_REGEX.find(s)?.let {
+            val sec = it.groupValues[1].toIntOrNull() ?: -1
+            if (sec in 0..600) return sec
+        }
+        CHIP_COUNTDOWN_REGEX.find(s)?.let {
+            val sec = it.groupValues[1].toIntOrNull() ?: -1
+            if (sec in 0..90) return sec
+        }
         return -1
     }
 
