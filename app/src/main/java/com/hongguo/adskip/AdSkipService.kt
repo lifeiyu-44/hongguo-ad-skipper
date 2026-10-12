@@ -89,11 +89,22 @@ class AdSkipService : AccessibilityService() {
         /** 游戏类广告的特征按钮：点击进入游戏/点击试玩 等（仅作识别信号，绝不点击） */
         val GAME_AD_REGEX = Regex("""点击进入游戏|点击试玩|立即试玩|点击游玩|点击开玩""")
 
+        /**
+         * 商城推广卡片广告的特征文字（「商城好物省心选」）。
+         * 不用整串 contains：广告 SDK 会在文字间插隐形字符（零宽空格等指纹），
+         * 肉眼与日志里看起来一模一样却匹配不上；这里允许字间夹杂任意空白，
+         * 配合 normalizeText 丢弃零宽字符后可稳定命中。
+         */
+        val MALL_PROMO_REGEX = Regex("""商\s*城\s*好\s*物\s*省\s*心\s*选""")
+
         private const val AD_LABEL = "广告"
 
         // ---- 扫描节奏 ----
         private const val POLL_INTERVAL_MS = 350L
-        private const val WINDOW_NODE_LIMIT = 600   // 每个窗口扫描的节点上限（多窗口合并）
+        // 与一键反馈的文字转储（900）保持同一预算：广告 SDK 的视图树常有
+        // 数百个无文字节点，预算太小会在走到特征文字前耗尽，造成"转储能看到、
+        // 扫描却漏检"的漏报
+        private const val WINDOW_NODE_LIMIT = 900   // 每个窗口扫描的节点上限（多窗口合并）
         private const val PROBE_NODE_LIMIT = 260     // 非目标应用的轻量探测上限
         private const val PROBE_EVERY_N_TICKS = 3    // 非目标应用降低探测频率
 
@@ -506,10 +517,9 @@ class AdSkipService : AccessibilityService() {
                 continue
             }
             result.textNodeCount++
-            if (!result.mallPromoAd && (text?.contains("商城好物省心选") == true ||
-                        desc?.contains("商城好物省心选") == true)
-            ) {
-                result.mallPromoAd = true
+            if (!result.mallPromoAd) {
+                val mallHit = { s: String? -> s != null && s.length <= 40 && MALL_PROMO_REGEX.containsMatchIn(s) }
+                if (mallHit(text) || mallHit(desc)) result.mallPromoAd = true
             }
             if (result.countdownSec < 0) {
                 if (text != null) {
@@ -654,6 +664,9 @@ class AdSkipService : AccessibilityService() {
                 ) {
                     emptyFlipTimes.addLast(now)
                     emptySinceAt = now
+                    // 商城推广卡片的下半屏是商品面板（价格/按钮区），从下部起手
+                    // 会被面板拦截导致翻页失败，改为上部起手；纯空屏广告保持下部起手
+                    if (found.mallPromoAd) lastSheetLikely = true
                     appendLog(
                         "屏幕几乎读不到文字，疑似画面型广告（" +
                                 (if (found.mallPromoAd) "商城推广卡片" else "空屏") + "），尝试上滑"
@@ -1199,6 +1212,10 @@ class AdSkipService : AccessibilityService() {
                         " ｜ 商品面板=${if (s.sheet) "有" else "无"}" +
                         " ｜ 锁定提示=${if (s.lockedToast) "有" else "无"}"
             )
+            sb.appendLine(
+                "          商城卡片=${if (s.mallPromoAd) "有" else "无"}" +
+                        " ｜ 可见文字节点=${s.textNodeCount}"
+            )
         } else {
             sb.appendLine("识别快照: （尚未产生扫描数据）")
         }
@@ -1327,8 +1344,9 @@ class AdSkipService : AccessibilityService() {
 
     /**
      * 文案归一化：全角数字/字母、各类 Unicode 空格（含不换行空格 U+00A0）、繁体「後」
-     * 统一成常规字符后再匹配。广告 SDK 的排版常混用这些字符，正则里的 \s 与 ASCII
-     * 数字无法覆盖，会导致倒计时文案"看起来一样却匹配不上"。
+     * 统一成常规字符后再匹配；零宽字符（U+200B–200F、U+2060、U+FEFF）直接丢弃。
+     * 广告 SDK 的排版常混用这些字符——零宽字符肉眼不可见、日志里打印出来也一样，
+     * 但会让「商城好物省心选」这类 contains/正则整体失配，导致广告漏检。
      */
     private fun normalizeText(s: String?): String? {
         if (s == null) return null
@@ -1340,6 +1358,7 @@ class AdSkipService : AccessibilityService() {
                 ch == 'ｓ' -> { sb.append('s'); changed = true }
                 ch == 'Ｓ' -> { sb.append('S'); changed = true }
                 ch == '後' -> { sb.append('后'); changed = true }
+                ch.code in 0x200B..0x200F || ch.code == 0x2060 || ch.code == 0xFEFF -> { changed = true }
                 ch == '\u00A0' || ch == '\u3000' || ch.code == 0x202F || ch.code == 0x205F ||
                         ch.code in 0x2000..0x200A -> { sb.append(' '); changed = true }
                 else -> sb.append(ch)
