@@ -1,163 +1,201 @@
 /**
- * 零依赖 SMTP 发信客户端（支持 465 隐式 TLS / 587 STARTTLS + AUTH LOGIN）
+ * 零依赖 SMTP 发信客户端（支持 465 隐式 TLS / 587 STARTTLS，AUTH LOGIN）
  * 适用于 QQ 邮箱、163 邮箱等个人 SMTP 授权码场景。
+ *
+ * 协议要点：
+ *  - SMTP 响应可能多行（"250-xxx" 为续行，末行是「3位数字+空格+文本」），
+ *    且 TCP 会任意分片 —— 必须按行缓冲，遇到末行才认为一段响应结束；
+ *  - 发信成功的权威信号是 DATA 结束后的 "250 ...queued"，拿到即可结束。
  */
 const net = require('net');
 const tls = require('tls');
 
 /**
- * sendMail(cfg, mail)
- * cfg: { host, port, user, pass, from? }   mail: { from, to, subject, body }
- * 返回 Promise，成功 resolve 服务器结束响应文本。
+ * sendMail(cfg, mail) -> Promise<string>
+ * cfg : { host, port, user, pass, from?, starttls? }
+ * mail: { to, subject, body, fromName? }
  */
 function sendMail(cfg, mail) {
   return new Promise((resolve, reject) => {
-    const socket = cfg.port === 465
-      ? tls.connect({ host: cfg.host, port: cfg.port, rejectUnauthorized: false }, onConnect)
-      : net.connect({ host: cfg.host, port: cfg.port }, () => startTlsIfWanted());
+    const host = cfg.host;
+    const port = parseInt(cfg.port || 465, 10) || 465;
+    // 隐式 TLS：465 端口默认走（QQ/163 常用）；cfg.tls 可显式覆盖（测试/特殊服务器用）
+    const implicitTls = cfg.tls === true || (cfg.tls !== false && port === 465);
+    const allowStartTls = !implicitTls && cfg.starttls !== false;
+    // servername 传 IP 会触发 Node 弃用警告且被忽略，IP 场景下不传
+    const sniName = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ? undefined : host;
 
-    let buffer = '';
-    let stage = cfg.port === 465 ? 'banner' : 'banner';
-    let usingTls = cfg.port === 465;
+    let socket = null;
+    let finished = false;
+    let stage = 'greeting';
+    let lineBuf = '';
+    let respLines = [];
 
-    const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
-    const encodedSubject = '=?UTF-8?B?' + b64(mail.subject) + '?=';
+    const b64 = (s) => Buffer.from(String(s == null ? '' : s), 'utf8').toString('base64');
 
-    function startTlsIfWanted() {
-      // 587 等明文端口先走 banner -> EHLO -> STARTTLS 流程，复用同一对话状态机
+    const done = (err, info) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try {
+        socket && socket.end();
+      } catch (_) {}
+      if (err) reject(err instanceof Error ? err : new Error(String(err)));
+      else resolve(info || 'ok');
+    };
+
+    const timer = setTimeout(() => done(new Error('smtp_timeout')), 25000);
+
+    const send = (line) => {
+      if (finished) return;
+      try {
+        socket.write(line + '\r\n');
+      } catch (e) {
+        done(new Error('smtp_socket: ' + e.message));
+      }
+    };
+
+    function buildMessage() {
+      const fromAddr = cfg.from || cfg.user;
+      const head =
+        `From: =?UTF-8?B?${b64(mail.fromName || '红果广告跳过')}?= <${fromAddr}>\r\n` +
+        `To: <${mail.to}>\r\n` +
+        `Subject: =?UTF-8?B?${b64(mail.subject || '')}?=\r\n` +
+        `Date: ${new Date().toUTCString()}\r\n` +
+        `MIME-Version: 1.0\r\n` +
+        `Content-Type: text/plain; charset=UTF-8\r\n` +
+        `Content-Transfer-Encoding: base64\r\n` +
+        `\r\n`;
+      // base64 正文每 76 字符折行；base64 字母表不含行首 '.'，无需 dot-stuffing
+      const bodyB64 = b64(mail.body || '').replace(/(.{76})/g, '$1\r\n');
+      return head + bodyB64;
     }
 
-    function onConnect() {}
-
-    socket.setTimeout(20 * 1000);
-    socket.on('timeout', () => {
-      socket.destroy();
-      reject(new Error('smtp_timeout'));
-    });
-    socket.on('error', (e) => {
-      if (stage !== 'done') reject(new Error('smtp_socket: ' + e.message));
-    });
-
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8');
-      // 一行以 "数字+空格" 结尾才算完整响应（250-xxx 为续行）
-      const m = /^(\d{3})[ ](.*)\r?\n$/s.exec(buffer.trimEnd());
-      if (!m) {
-        const cont = /^(\d{3})-/.test(buffer.trimEnd());
-        if (!cont) return; // 响应未完，继续等
-        buffer = '';
-        return;
-      }
-      const code = parseInt(m[1], 10);
-      const rest = buffer;
-      buffer = '';
-
-      if (stage === 'done') return;
-
-      if (code >= 500) {
-        stage = 'done';
-        socket.end();
-        reject(new Error('smtp_' + code + ': ' + m[2].slice(0, 120)));
-        return;
-      }
-
+    function onResponse(code, text) {
+      if (finished) return;
       switch (stage) {
-        case 'banner':
+        case 'greeting':
+          if (code !== 220) return done(new Error('smtp_bad_greeting_' + code));
           stage = 'ehlo';
-          socket.write('EHLO hongguo.local\r\n');
-          return;
+          return send('EHLO hongguo.local');
         case 'ehlo':
-          if (code !== 250) break;
-          if (!usingTls && cfg.port !== 465 && cfg.starttls !== false) {
-            stage = 'starttls';
-            socket.write('STARTTLS\r\n');
-            return;
+          if (code !== 250) return done(new Error('smtp_bad_ehlo_' + code));
+          if (implicitTls || !allowStartTls) {
+            stage = 'auth';
+            return send('AUTH LOGIN');
           }
-          stage = 'auth1';
-          socket.write('AUTH LOGIN\r\n');
-          return;
+          stage = 'starttls';
+          return send('STARTTLS');
         case 'starttls':
-          if (code !== 220) break;
-          // 明文连接升级为 TLS：替换数据流
-          const tlsSock = tls.connect(
-            { socket, rejectUnauthorized: false, servername: cfg.host },
-            () => {
-              usingTls = true;
-              stage = 'ehlo2';
-              tlsSock.write('EHLO hongguo.local\r\n');
-            }
-          );
-          tlsSock.on('error', (e) => {
-            if (stage !== 'done') reject(new Error('smtp_tls: ' + e.message));
-          });
-          tlsSock.on('data', (chunk2) => socket.emit('data', chunk2));
-          // 后续写操作都走 tlsSock
-          Object.defineProperty(socket, 'write', {
-            value: tlsSock.write.bind(tlsSock),
-            configurable: true,
-          });
-          return;
+          if (code !== 220) return done(new Error('smtp_starttls_refused_' + code));
+          return upgradeToTls();
         case 'ehlo2':
-          stage = 'auth1';
-          socket.write('AUTH LOGIN\r\n');
-          return;
-        case 'auth1':
-          stage = 'auth2';
-          socket.write(b64(cfg.user) + '\r\n');
-          return;
-        case 'auth2':
-          stage = 'auth3';
-          socket.write(b64(cfg.pass) + '\r\n');
-          return;
-        case 'auth3':
-          if (code !== 235) {
-            stage = 'done';
-            socket.end();
-            reject(new Error('smtp_auth_failed'));
-            return;
-          }
-          stage = 'mailfrom';
-          socket.write(`MAIL FROM:<${mail.from}>\r\n`);
-          return;
-        case 'mailfrom':
-          stage = 'rcpto';
-          socket.write(`RCPT TO:<${mail.to}>\r\n`);
-          return;
-        case 'rcpto':
+          if (code !== 250) return done(new Error('smtp_bad_ehlo_' + code));
+          stage = 'auth';
+          return send('AUTH LOGIN');
+        case 'auth': // 服务器请求用户名（334 后 base64 提示）
+          if (code !== 334) return done(new Error('smtp_auth_rejected_' + code));
+          stage = 'authUser';
+          return send(b64(cfg.user));
+        case 'authUser': // 服务器请求密码
+          if (code !== 334) return done(new Error('smtp_auth_rejected_' + code));
+          stage = 'authPass';
+          return send(b64(cfg.pass));
+        case 'authPass':
+          if (code !== 235) return done(new Error('smtp_auth_failed_' + code));
+          stage = 'mailFrom';
+          return send(`MAIL FROM:<${cfg.from || cfg.user}>`);
+        case 'mailFrom':
+          if (code !== 250) return done(new Error('smtp_mailfrom_failed_' + code));
+          stage = 'rcptTo';
+          return send(`RCPT TO:<${mail.to}>`);
+        case 'rcptTo':
+          if (code !== 250 && code !== 251) return done(new Error('smtp_rcpt_failed_' + code));
           stage = 'data';
-          socket.write('DATA\r\n');
+          return send('DATA');
+        case 'data':
+          if (code !== 354) return done(new Error('smtp_data_refused_' + code));
+          stage = 'endOfData';
+          try {
+            socket.write(buildMessage() + '\r\n.\r\n');
+          } catch (e) {
+            return done(new Error('smtp_socket: ' + e.message));
+          }
           return;
-        case 'data': {
-          stage = 'body';
-          const headers =
-            `From: =?UTF-8?B?${b64('红果广告跳过')}?= <${mail.from}>\r\n` +
-            `To: <${mail.to}>\r\n` +
-            `Subject: ${encodedSubject}\r\n` +
-            `Date: ${new Date().toUTCString()}\r\n` +
-            `MIME-Version: 1.0\r\n` +
-            `Content-Type: text/plain; charset=UTF-8\r\n` +
-            `Content-Transfer-Encoding: base64\r\n` +
-            `\r\n`;
-          // 正文 base64 + 每行 76 字符（点号开头的行做防填充，普通验证码邮件无此情况）
-          const bodyB64 = b64(mail.body).replace(/(.{76})/g, '$1\r\n');
-          socket.write(headers + bodyB64 + '\r\n.\r\n');
-          return;
-        }
-        case 'body':
-          stage = 'quit';
-          socket.write('QUIT\r\n');
-          return;
-        case 'quit':
+        case 'endOfData':
+          // 权威成功信号：服务器已接收并排队
+          if (code !== 250) return done(new Error('smtp_send_failed_' + code));
+          send('QUIT');
           stage = 'done';
-          socket.end();
-          resolve(rest.trim());
-          return;
+          return done(null, text);
+        default:
+          return done(new Error('smtp_unexpected_state_' + stage));
       }
-      // 非预期状态码
-      stage = 'done';
-      socket.end();
-      reject(new Error('smtp_unexpected_' + code));
-    });
+    }
+
+    function onData(chunk) {
+      if (finished) return;
+      lineBuf += chunk.toString('utf8');
+      let idx;
+      while ((idx = lineBuf.indexOf('\n')) !== -1) {
+        const line = lineBuf.slice(0, idx).replace(/\r$/, '');
+        lineBuf = lineBuf.slice(idx + 1);
+        respLines.push(line);
+        // 末行形如 "250 OK" / 裸 "250"；"250-" 是续行，继续等
+        if (/^\d{3}(\s|$)/.test(line)) {
+          const code = parseInt(line.slice(0, 3), 10);
+          const text = respLines.join(' | ');
+          respLines = [];
+          onResponse(code, text);
+          if (finished) return;
+        }
+      }
+    }
+
+    function attach(sock, isTls) {
+      socket = sock;
+      sock.setTimeout(25000);
+      sock.on('data', onData);
+      sock.on('timeout', () => done(new Error('smtp_timeout')));
+      sock.on('error', (e) => done(new Error((isTls ? 'smtp_tls: ' : 'smtp_socket: ') + e.message)));
+      sock.on('close', () => {
+        if (!finished) done(new Error('smtp_closed_early'));
+      });
+    }
+
+    function upgradeToTls() {
+      const plain = socket;
+      try {
+        plain.removeAllListeners('data');
+        plain.removeAllListeners('timeout');
+        plain.removeAllListeners('close');
+      } catch (_) {}
+      const sec = tls.connect(
+        {
+          socket: plain,
+          servername: sniName,
+          // 自建工具：不为证书链/中间盒问题阻断发信（内容仍全程加密）
+          rejectUnauthorized: false,
+        },
+        () => {
+          attach(sec, true);
+          stage = 'ehlo2';
+          send('EHLO hongguo.local');
+        }
+      );
+      sec.on('error', (e) => done(new Error('smtp_tls: ' + e.message)));
+    }
+
+    if (implicitTls) {
+      const sec = tls.connect(
+        { host, port, servername: sniName, rejectUnauthorized: false },
+        () => attach(sec, true)
+      );
+      sec.on('error', (e) => done(new Error('smtp_tls: ' + e.message)));
+    } else {
+      const plain = net.connect({ host, port }, () => attach(plain, false));
+      plain.on('error', (e) => done(new Error('smtp_socket: ' + e.message)));
+    }
   });
 }
 

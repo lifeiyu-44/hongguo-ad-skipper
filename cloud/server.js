@@ -842,7 +842,8 @@ async function handle(req, res) {
       const host = String(body.host || '').trim();
       const port = parseInt(body.port || '465', 10) || 465;
       const user = String(body.user || '').trim();
-      let pass = String(body.pass || '');
+      // 授权码常被带空格/换行粘贴（或按 4 位分组显示）：一律去掉所有空白字符
+      let pass = String(body.pass || '').replace(/\s+/g, '');
       const from = String(body.from || '').trim() || user;
       if (!pass) {
         // 授权码留空 = 保留旧的（仅改其他字段时无需重输）

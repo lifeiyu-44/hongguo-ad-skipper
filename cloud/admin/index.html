@@ -91,6 +91,15 @@
   .auth-tabs button { flex:1; }
   .auth-tabs button.on { background:var(--main); color:#fff; border-color:var(--main); }
   code.k { background:#eef0f4; border-radius:6px; padding:2px 8px; font-size:12.5px; }
+
+  /* 表单（邮件设置页） */
+  .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px; max-width:660px; }
+  .form-grid .fld { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--sub); }
+  .form-grid .fld input { font-size:14px; color:var(--txt); }
+  .form-grid .fld em { font-style:normal; font-size:12px; color:var(--sub); }
+  .form-grid .span2 { grid-column:1 / -1; }
+  @media (max-width:640px) { .form-grid { grid-template-columns:1fr; } }
+  .note { background:#f7f8fa; border:1px solid var(--line); border-radius:10px; padding:12px 14px; font-size:12.5px; color:var(--sub); line-height:1.8; margin-top:16px; max-width:660px; }
 </style>
 </head>
 <body>
@@ -177,25 +186,45 @@
       </div>
 
       <div id="p-smtp" class="hidden">
-        <h2>发信邮箱设置（App 注册验证码）</h2>
-        <div class="sub" id="smtpStatus" style="margin-bottom:10px">加载中…</div>
-        <div class="row tight">
-          <input id="sHost" class="grow" placeholder="SMTP 服务器，如 smtp.qq.com">
-          <input id="sPort" placeholder="端口" style="width:90px" value="465">
+        <h2>发信邮箱（用于 App 注册验证码）</h2>
+        <div id="smtpStatusBox" class="msg err">加载中…</div>
+
+        <div class="form-grid">
+          <label class="fld">
+            <span>SMTP 服务器</span>
+            <input id="sHost" placeholder="smtp.qq.com">
+          </label>
+          <label class="fld">
+            <span>端口</span>
+            <input id="sPort" value="465">
+          </label>
+          <label class="fld span2">
+            <span>发信邮箱</span>
+            <input id="sUser" placeholder="如 1446549784@qq.com" autocomplete="off">
+          </label>
+          <label class="fld span2">
+            <span>邮箱授权码 <em>（不是登录密码；已配置时留空表示不修改）</em></span>
+            <input id="sPass" type="password" placeholder="粘贴 16 位授权码（如 abcdabcdabcdabcd）" autocomplete="new-password">
+          </label>
         </div>
-        <div class="row tight">
-          <input id="sUser" class="grow" placeholder="发信邮箱，如 1446549784@qq.com" autocomplete="off">
-          <input id="sFrom" class="grow" placeholder="发件人显示邮箱（默认同上，可留空）" autocomplete="off">
-        </div>
-        <div class="row tight">
-          <input id="sPass" type="password" class="grow" placeholder="邮箱授权码（不是登录密码；留空=不修改）" autocomplete="new-password">
-        </div>
-        <div class="row tight">
+        <div class="row" style="margin-top:16px">
           <button class="primary" onclick="saveSmtp()">保存配置</button>
-          <input id="sTestTo" class="grow" placeholder="测试收件邮箱（留空=发到发信邮箱）">
+        </div>
+
+        <h2 style="margin-top:28px">发送测试邮件</h2>
+        <div class="row tight">
+          <input id="sTestTo" class="grow" placeholder="收件邮箱（留空 = 发到上面的发信邮箱）">
           <button class="ghost" onclick="testSmtp()">发送测试邮件</button>
         </div>
-        <div class="sub">QQ 邮箱授权码获取：网页版QQ邮箱 → 设置 → 账户 → 「POP3/IMAP/SMTP服务」→ 开启 → 生成授权码（16位）。配置保存后立即生效，无需重启。</div>
+
+        <div class="note">
+          <b>QQ 邮箱授权码怎么拿：</b><br>
+          1. 电脑浏览器打开 mail.qq.com → 右上角「设置」→「账户」标签<br>
+          2. 页面下拉到「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」<br>
+          3. 开启「IMAP/SMTP服务」→ 按弹窗提示用绑定手机发短信 → 得到 16 位授权码<br>
+          <br>
+          配置保存后立即生效、无需重启；授权码只保存在服务器上（权限 600），此处不回显。
+        </div>
       </div>
     </div>
   </div>
@@ -433,41 +462,64 @@ async function changePw() {
 }
 
 /* ---------- 邮件设置 ---------- */
+function setSmtpStatus(ok, user) {
+  const el = $('smtpStatusBox');
+  if (ok) {
+    el.className = 'msg ok';
+    el.textContent = '✓ 已配置：' + user + '（App 注册验证码可正常发送）';
+  } else {
+    el.className = 'msg err';
+    el.textContent = '✗ 未配置：App 注册暂不可用，请在下方填写并发保存';
+  }
+}
+function smtpErrText(detail) {
+  const d = String(detail || '');
+  if (!d) return '未知错误';
+  if (d.includes('smtp_auth_failed')) return '授权码不正确，或授权码与「发信邮箱」不是同一个账号生成的（请在 QQ 邮箱重新生成授权码后再试）';
+  if (d.includes('smtp_timeout')) return '连接超时：服务器连不上 SMTP（QQ 邮箱应为 smtp.qq.com + 端口 465）';
+  if (d.includes('smtp_tls')) return 'TLS 加密握手失败：' + d;
+  if (d.includes('smtp_socket')) return '网络连接失败：' + d;
+  if (d.includes('smtp_rcpt')) return '收件地址被服务器拒绝：' + d;
+  if (d.includes('smtp_mailfrom') || d.includes('smtp_data') || d.includes('smtp_send_failed')) return '发信被服务器拒绝（可能触发发信频率限制）：' + d;
+  if (d === 'missing_fields') return '首次配置必须填写授权码';
+  if (d === 'bad_email') return '收件邮箱格式不正确';
+  if (d === 'smtp_not_configured') return '尚未保存配置，请先保存';
+  return d;
+}
 async function loadSmtp() {
   const r = await api('/api/admin/smtp');
   if (!r.data.ok) return;
   $('sHost').value = r.data.host || 'smtp.qq.com';
   $('sPort').value = r.data.port || 465;
-  $('sUser').value = r.data.user || '1446549784@qq.com';
-  $('sFrom').value = r.data.from || '';
+  $('sUser').value = r.data.user || '';
   $('sPass').value = '';
-  $('smtpStatus').textContent = r.data.configured
-    ? '当前已配置：' + r.data.user + '（修改授权码请重新粘贴，保存后立即生效）'
-    : '当前未配置：邮箱验证码不可用，App 注册暂不可用';
+  setSmtpStatus(r.data.configured, r.data.user);
 }
 async function saveSmtp() {
   const body = {
     host: $('sHost').value.trim(),
     port: parseInt($('sPort').value, 10) || 465,
     user: $('sUser').value.trim(),
-    from: $('sFrom').value.trim(),
     pass: $('sPass').value,
   };
   if (!body.host || !body.user) { showMsg('msgMain', '请填 SMTP 服务器和发信邮箱', false); return; }
   const r = await api('/api/admin/smtp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (r.data.ok) {
-    showMsg('msgMain', '已保存，可点「发送测试邮件」验证', true);
+    showMsg('msgMain', '已保存。建议点「发送测试邮件」验证配置', true);
     loadSmtp();
     setTimeout(() => $('msgMain').className = 'msg err hidden', 3000);
   } else {
-    showMsg('msgMain', '保存失败：' + (r.data.error || r.status) + (r.data.error === 'missing_fields' ? '（首次配置必须填授权码）' : ''), false);
+    showMsg('msgMain', '保存失败：' + smtpErrText(r.data.error), false);
   }
 }
 async function testSmtp() {
-  showMsg('msgMain', '正在发送测试邮件…', true);
+  showMsg('msgMain', '正在连接 SMTP 服务器发送测试邮件（约 3~10 秒）…', true);
   const r = await api('/api/admin/smtp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: $('sTestTo').value.trim() }) });
-  if (r.data.ok) showMsg('msgMain', '测试邮件已发送至 ' + r.data.to + '，请查收（含垃圾箱）', true);
-  else showMsg('msgMain', '发送失败：' + (r.data.error || r.status) + (r.data.detail ? '（' + r.data.detail + '）' : ''), false);
+  if (r.data.ok) {
+    showMsg('msgMain', '✓ 测试邮件已发送至 ' + r.data.to + '，请查收（含垃圾箱）', true);
+  } else {
+    showMsg('msgMain', '✗ ' + smtpErrText(r.data.detail || r.data.error), false);
+  }
 }
 
 /* ---------- 启动 ---------- */
