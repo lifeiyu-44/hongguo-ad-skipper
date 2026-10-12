@@ -117,6 +117,11 @@ class AdSkipService : AccessibilityService() {
         private const val UNLOCK_BLINK_GRACE_MS = 900L    // 提示闪断宽限：间隔多久内重新出现仍算连续
         private const val MAX_ATTEMPTS = 8                // 同一波广告最多尝试次数（覆盖被锁定期拒绝后的重试）
         private const val RETRY_GAP_MS = 3500L            // 重试间隔（放宽以减少滑动打扰）
+        // 快节奏档（分类优化）：直播推广页/画面型兜底这类整页广告会一直卡住用户，
+        // 且没有红果锁定期拒绝的风险，动作间隔缩到 2 秒档尽快退出；
+        // 倒计时类广告仍走上面的慢节奏，避免与锁定期顶撞
+        private const val FAST_RETRY_COOLDOWN_MS = 2000L
+        private const val FAST_RETRY_GAP_MS = 1800L
         private const val LOCKED_WAVE_LIMIT_MS = 25000L   // 锁定期广告等待正向信号的上限，超时复位重新判定
         private const val AD_BLINK_GRACE_MS = 800L        // 广告特征闪断（UI重绘瞬间）的宽限，不重新计时
         // ---- 画面型广告兜底（可选功能，默认开启）----
@@ -862,11 +867,12 @@ class AdSkipService : AccessibilityService() {
                     )
                 } else if (found.unlocked) {
                     // 无倒计时广告的解锁提示：立即上滑。已连滑 2 次仍没翻出去的
-                    // （品牌直播等推广页会吸收上滑手势），改点页面自带的「返回」退出
+                    // （品牌直播等推广页会吸收上滑手势），改点页面自带的「返回」退出。
+                    // 推广页整页卡住用户且无锁定期风险，走 2 秒快节奏档
                     if (retryCount >= 2 && found.backBounds != null) {
                         exitViaBack(found)
                     } else {
-                        attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
+                        attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false, fastRetry = true)
                     }
                 } else if (lockToastSeenAt == 0L && now >= deadlineAt) {
                     // 本次扫描已确认无倒计时文字，才执行兜底上滑。
@@ -874,7 +880,7 @@ class AdSkipService : AccessibilityService() {
                     if (retryCount >= 2 && found.backBounds != null) {
                         exitViaBack(found)
                     } else {
-                        attemptSkip(found.skipNode, "广告等待超时，尝试上滑", countdownVisible = false)
+                        attemptSkip(found.skipNode, "广告等待超时，尝试上滑", countdownVisible = false, fastRetry = true)
                     }
                 }
             }
@@ -945,7 +951,12 @@ class AdSkipService : AccessibilityService() {
      * 执行一次跳过尝试：优先点「跳过」按钮，否则上滑。
      * 成功与否下次扫描自见分晓：广告特征还在就由 FALLBACK 模式按 RETRY_GAP 重试。
      */
-    private fun attemptSkip(skipNode: AccessibilityNodeInfo?, reason: String, countdownVisible: Boolean) {
+    private fun attemptSkip(
+        skipNode: AccessibilityNodeInfo?,
+        reason: String,
+        countdownVisible: Boolean,
+        fastRetry: Boolean = false
+    ) {
         // 总闸（铁律）：本轮扫描屏幕上还有倒计时文字时，除倒计时自己的
         // 结束/硬超时外一律拒绝。任何路径都无法在倒计时结束前翻页或点击
         if (countdownVisible && !reason.startsWith("倒计时")) {
@@ -953,7 +964,8 @@ class AdSkipService : AccessibilityService() {
             return
         }
         retryCount++
-        cooldownUntil = SystemClock.elapsedRealtime() + AFTER_SWIPE_COOLDOWN_MS
+        val cooldown = if (fastRetry) FAST_RETRY_COOLDOWN_MS else AFTER_SWIPE_COOLDOWN_MS
+        cooldownUntil = SystemClock.elapsedRealtime() + cooldown
 
         var clicked = false
         if (skipNode != null) {
@@ -978,8 +990,9 @@ class AdSkipService : AccessibilityService() {
         if (fallbackSinceAt == 0L) {
             fallbackSinceAt = SystemClock.elapsedRealtime()
         }
-        deadlineAt = SystemClock.elapsedRealtime() + RETRY_GAP_MS
-        scheduleDeadlineKick(RETRY_GAP_MS)
+        val gap = if (fastRetry) FAST_RETRY_GAP_MS else RETRY_GAP_MS
+        deadlineAt = SystemClock.elapsedRealtime() + gap
+        scheduleDeadlineKick(gap)
         val n = skipCount.value + 1
         skipCount.value = n
         Prefs.setSkipCount(this, n)
@@ -993,7 +1006,7 @@ class AdSkipService : AccessibilityService() {
     private fun exitViaBack(found: ScanResult) {
         val r = found.backBounds ?: return
         retryCount++
-        cooldownUntil = SystemClock.elapsedRealtime() + AFTER_SWIPE_COOLDOWN_MS
+        cooldownUntil = SystemClock.elapsedRealtime() + FAST_RETRY_COOLDOWN_MS
         val path = Path().apply {
             moveTo(r.exactCenterX(), r.exactCenterY())
             lineTo(r.exactCenterX(), r.exactCenterY())
@@ -1014,8 +1027,8 @@ class AdSkipService : AccessibilityService() {
         val n = skipCount.value + 1
         skipCount.value = n
         Prefs.setSkipCount(this, n)
-        deadlineAt = SystemClock.elapsedRealtime() + RETRY_GAP_MS
-        scheduleDeadlineKick(RETRY_GAP_MS)
+        deadlineAt = SystemClock.elapsedRealtime() + FAST_RETRY_GAP_MS
+        scheduleDeadlineKick(FAST_RETRY_GAP_MS)
     }
 
     private fun swipeUp(reason: String) {
