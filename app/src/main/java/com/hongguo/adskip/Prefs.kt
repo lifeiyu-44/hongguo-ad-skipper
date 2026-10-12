@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_URL_MIGRATED = "feedback_url_migrated_v1"
     private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_AUTH_EMAIL = "auth_email"
+    private const val KEY_AUTH_ROLE = "auth_role"
     private const val KEY_LAST_NOTIFY_VER = "last_notify_ver"
     private const val KEY_FB_Y = "feedback_btn_y"
     private const val KEY_VISUAL_FALLBACK = "visual_ad_fallback"
@@ -71,6 +72,9 @@ object Prefs {
      */
     fun getFeedbackUrl(ctx: Context): String {
         migrateLegacyUrl(ctx)
+        // 服务器地址仅管理员可自定义：普通用户/未登录一律固定使用云端默认地址，
+        // 从机制上杜绝普通用户改动上报服务器（与"地址设置仅管理员可见"配套）
+        if (getAuthRole(ctx) != "admin") return DEFAULT_FEEDBACK_URL
         val v = sp(ctx).getString(KEY_FB_URL, null)
         return if (v.isNullOrBlank()) DEFAULT_FEEDBACK_URL else v
     }
@@ -118,11 +122,26 @@ object Prefs {
     fun getAuthEmail(ctx: Context): String =
         sp(ctx).getString(KEY_AUTH_EMAIL, null) ?: ""
 
-    fun setAuth(ctx: Context, email: String, token: String) =
-        sp(ctx).edit().putString(KEY_AUTH_EMAIL, email).putString(KEY_AUTH_TOKEN, token).apply()
+    fun setAuth(ctx: Context, email: String, token: String, role: String = "user") =
+        sp(ctx).edit()
+            .putString(KEY_AUTH_EMAIL, email)
+            .putString(KEY_AUTH_TOKEN, token)
+            .putString(KEY_AUTH_ROLE, role)
+            .apply()
+
+    /** 账号角色：admin=管理员（可见服务器地址设置与运行日志），其余为普通用户 */
+    fun getAuthRole(ctx: Context): String =
+        sp(ctx).getString(KEY_AUTH_ROLE, null) ?: ""
+
+    fun setAuthRole(ctx: Context, role: String) =
+        sp(ctx).edit().putString(KEY_AUTH_ROLE, role).apply()
 
     fun clearAuth(ctx: Context) =
-        sp(ctx).edit().remove(KEY_AUTH_EMAIL).remove(KEY_AUTH_TOKEN).apply()
+        sp(ctx).edit()
+            .remove(KEY_AUTH_EMAIL)
+            .remove(KEY_AUTH_TOKEN)
+            .remove(KEY_AUTH_ROLE)
+            .apply()
 
     /** 更新提醒去重：同版本只通知一次 */
     fun getLastNotifyVer(ctx: Context): String =

@@ -58,6 +58,7 @@
     <string name="account_btn_login">登录 / 注册</string>
     <string name="account_btn_logout">退出登录</string>
     <string name="account_logged_fmt">已登录：%1$s</string>
+    <string name="account_logged_admin_fmt">已登录：%1$s（管理员）</string>
     <string name="account_code_sent">验证码已发送：请查收最新一封邮件里的 6 位数字（15 分钟内有效）</string>
     <string name="account_login_ok">登录成功 ✓ 反馈将关联你的邮箱</string>
     <string name="account_reg_ok">注册成功 ✓</string>
@@ -90,5 +91,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.35.6 · 手机/平板通用 · 云端上报</string>
+    <string name="version_label">版本 1.35.7 · 手机/平板通用 · 云端上报</string>
 </resources>

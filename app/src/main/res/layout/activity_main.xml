@@ -199,53 +199,61 @@
                     android:layout_marginTop="6dp"
                     android:text="@string/btn_reset_targets" />
 
+                <!-- 服务器地址设置：仅管理员可见（普通用户/未登录用户完全隐藏） -->
                 <LinearLayout
+                    android:id="@+id/boxServerSettings"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:orientation="vertical">
 
-                    <EditText
-                        android:id="@+id/editFeedbackUrl"
-                        android:layout_width="0dp"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:hint="@string/feedback_url_hint"
-                        android:importantForAutofill="no"
-                        android:inputType="textUri"
-                        android:maxLines="1"
-                        android:textSize="13sp" />
+                        android:layout_marginTop="10dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <EditText
+                            android:id="@+id/editFeedbackUrl"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="@string/feedback_url_hint"
+                            android:importantForAutofill="no"
+                            android:inputType="textUri"
+                            android:maxLines="1"
+                            android:textSize="13sp" />
+
+                        <Button
+                            android:id="@+id/btnSaveFeedbackUrl"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:minHeight="0dp"
+                            android:paddingStart="16dp"
+                            android:paddingTop="6dp"
+                            android:paddingEnd="16dp"
+                            android:paddingBottom="6dp"
+                            android:text="@string/btn_save" />
+                    </LinearLayout>
 
                     <Button
-                        android:id="@+id/btnSaveFeedbackUrl"
+                        android:id="@+id/btnResetCloud"
                         style="?attr/materialButtonOutlinedStyle"
-                        android:layout_width="wrap_content"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:minHeight="0dp"
-                        android:paddingStart="16dp"
-                        android:paddingTop="6dp"
-                        android:paddingEnd="16dp"
-                        android:paddingBottom="6dp"
-                        android:text="@string/btn_save" />
+                        android:layout_marginTop="6dp"
+                        android:text="@string/btn_reset_cloud" />
+
+                    <Button
+                        android:id="@+id/btnDiscover"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/btn_discover" />
                 </LinearLayout>
-
-                <Button
-                    android:id="@+id/btnResetCloud"
-                    style="?attr/materialButtonOutlinedStyle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="@string/btn_reset_cloud" />
-
-                <Button
-                    android:id="@+id/btnDiscover"
-                    style="?attr/materialButtonOutlinedStyle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="@string/btn_discover" />
 
                 <Button
                     android:id="@+id/btnCaptureAuth"
@@ -383,8 +391,9 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 日志卡片 -->
+        <!-- 日志卡片：仅管理员可见（普通用户/未登录用户完全隐藏；反馈报告仍会自动附带日志） -->
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardLogs"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"

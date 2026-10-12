@@ -623,7 +623,7 @@ async function handle(req, res) {
         )
         .run(email, hashPassword(password, salt), salt, new Date().toISOString());
       log('[用户] 新注册:', email);
-      sendJson(res, 200, { ok: true, token: createSession(Number(r.lastInsertRowid)) });
+      sendJson(res, 200, { ok: true, token: createSession(Number(r.lastInsertRowid)), role: 'user' });
       return;
     }
 

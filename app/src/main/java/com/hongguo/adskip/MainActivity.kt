@@ -200,11 +200,24 @@ class MainActivity : AppCompatActivity() {
         val btnAccLogout = findViewById<Button>(R.id.btnAccLogout)
         val textAccStatus = findViewById<TextView>(R.id.textAccStatus)
         val boxAccForm = findViewById<LinearLayout>(R.id.boxAccForm)
+        val boxServerSettings = findViewById<LinearLayout>(R.id.boxServerSettings)
+        val cardLogs = findViewById<View>(R.id.cardLogs)
+
+        /** 服务器地址设置与运行日志：仅管理员账号可见（普通用户/未登录完全隐藏） */
+        fun applyRoleVisibility(isAdmin: Boolean) {
+            boxServerSettings.visibility = if (isAdmin) View.VISIBLE else View.GONE
+            cardLogs.visibility = if (isAdmin) View.VISIBLE else View.GONE
+        }
 
         fun refreshAccountUi() {
             val email = Prefs.getAuthEmail(this)
+            val isAdmin = Prefs.getAuthRole(this) == "admin"
             if (email.isNotBlank()) {
-                textAccStatus.text = getString(R.string.account_logged_fmt, email)
+                textAccStatus.text = if (isAdmin) {
+                    getString(R.string.account_logged_admin_fmt, email)
+                } else {
+                    getString(R.string.account_logged_fmt, email)
+                }
                 boxAccForm.visibility = View.GONE
                 btnAccLogout.visibility = View.VISIBLE
             } else {
@@ -212,8 +225,20 @@ class MainActivity : AppCompatActivity() {
                 boxAccForm.visibility = View.VISIBLE
                 btnAccLogout.visibility = View.GONE
             }
+            applyRoleVisibility(isAdmin)
         }
         refreshAccountUi()
+
+        // 已登录时后台刷新角色：服务端角色变更（如被提升为管理员）后下次打开即生效
+        if (Prefs.getAuthToken(this).isNotBlank()) {
+            Thread {
+                val me = AccountApi.me(this)
+                if (me != null) {
+                    Prefs.setAuthRole(this, me.role)
+                    runOnUiThread { refreshAccountUi() }
+                }
+            }.start()
+        }
 
         btnSendCode.setOnClickListener {
             val email = editAccEmail.text.toString().trim()
@@ -263,7 +288,7 @@ class MainActivity : AppCompatActivity() {
                     btnAccLogin.isEnabled = true
                     when {
                         result.ok && result.token != null -> {
-                            Prefs.setAuth(this, email, result.token)
+                            Prefs.setAuth(this, email, result.token, result.role ?: "user")
                             refreshAccountUi()
                             Toast.makeText(
                                 this,
