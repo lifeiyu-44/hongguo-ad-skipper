@@ -134,12 +134,14 @@ class AdSkipService : AccessibilityService() {
         private const val SWIPE_START_FRACTION_LANDSCAPE = 0.78f
         private const val SWIPE_END_FRACTION_LANDSCAPE = 0.18f
         // 上部起手：直播购物类广告底部是可滚动商品面板，从下部起手手势会被
-        // 面板拦截导致翻页失败；改为从画面上部起手（避开面板），速度更快
-        private const val SWIPE_UPPER_DURATION_MS = 200L
-        private const val SWIPE_UPPER_START_PORTRAIT = 0.50f
-        private const val SWIPE_UPPER_END_PORTRAIT = 0.04f
-        private const val SWIPE_UPPER_START_LANDSCAPE = 0.50f
-        private const val SWIPE_UPPER_END_LANDSCAPE = 0.05f
+        // 面板拦截导致翻页失败；改为从画面上部起手（避开面板），速度更快。
+        // 起手点位于 0.60 屏高：品牌直播页中部的商品墙会吸收手势，
+        // 起手更高 + 更长行程才能越过手势吸收区
+        private const val SWIPE_UPPER_DURATION_MS = 220L
+        private const val SWIPE_UPPER_START_PORTRAIT = 0.60f
+        private const val SWIPE_UPPER_END_PORTRAIT = 0.03f
+        private const val SWIPE_UPPER_START_LANDSCAPE = 0.60f
+        private const val SWIPE_UPPER_END_LANDSCAPE = 0.04f
 
         // ---- 供 UI 订阅的状态 ----
         val running = MutableStateFlow(false)
@@ -208,6 +210,7 @@ class AdSkipService : AccessibilityService() {
     private var emptySinceAt = 0L                     // 屏幕读不到任何文字的起始时间（画面型广告检测）
     private var lastEmptySeenAt = 0L                  // 最近一次见到"空屏"的时间（闪断宽限用）
     private val emptyFlipTimes = ArrayDeque<Long>()   // 画面型广告兜底上滑的时间记录（限额用）
+    private var lastEmptyBackAt = 0L                  // 最近一次对空屏用系统返回键的时间（每窗口最多一次）
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -675,6 +678,21 @@ class AdSkipService : AccessibilityService() {
                     // 空屏一律上部起手：整屏无文字的多为直播/画面型广告，
                     // 下半屏常是商品面板或直播手势区，从下部起手会被拦截
                     lastSheetLikely = true
+                    // 上滑 2 次仍翻不出去的空屏（无文字的直播/推广页，手势被画面
+                    // 或商品墙吸收）：改按系统返回键，等效「返回」按钮且不依赖
+                    // 可读文字。每个限流窗口最多一次，防止连续后退误退出剧情
+                    if (emptyFlipTimes.size >= 3 && now - lastEmptyBackAt > EMPTY_FLIP_WINDOW_MS) {
+                        lastEmptyBackAt = now
+                        retryCount++
+                        cooldownUntil = now + AFTER_SWIPE_COOLDOWN_MS
+                        val n = skipCount.value + 1
+                        skipCount.value = n
+                        Prefs.setSkipCount(this, n)
+                        appendLog("空屏上滑 ${emptyFlipTimes.size - 1} 次仍未翻出，改按系统返回键退出推广页")
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                        publishAfterDecision(now)
+                        return
+                    }
                     appendLog(
                         "屏幕几乎读不到文字，疑似画面型广告（" +
                                 (if (found.mallPromoAd) "商城推广卡片" else "空屏") + "），尝试上滑"
