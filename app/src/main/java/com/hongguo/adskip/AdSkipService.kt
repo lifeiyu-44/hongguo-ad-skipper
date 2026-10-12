@@ -2,6 +2,8 @@ package com.hongguo.adskip
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -218,6 +220,97 @@ class AdSkipService : AccessibilityService() {
         val orient = if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"
         appendLog("服务已启动 v${BuildConfig.VERSION_NAME}（屏幕 ${dm.widthPixels}×${dm.heightPixels}，$orient）")
         mainHandler.post(ticker)
+        startUpdateWatch()
+    }
+
+    /* ---------- 在线版本巡检：服务运行期间每 6 小时静默检查，新版发通知栏提醒 ---------- */
+
+    private var updateWatchThread: Thread? = null
+
+    private fun startUpdateWatch() {
+        if (updateWatchThread?.isAlive == true) return
+        updateWatchThread = Thread {
+            Thread.sleep(60_000L) // 启动 1 分钟后首查，避开开机繁忙
+            while (true) {
+                try {
+                    checkCloudUpdate()
+                } catch (_: Exception) {
+                }
+                Thread.sleep(6 * 3600_000L)
+            }
+        }.apply {
+            isDaemon = true
+            name = "update-watch"
+            start()
+        }
+    }
+
+    private fun checkCloudUpdate() {
+        val base = UpdateChecker.baseUrl(this) ?: return
+        val conn = (java.net.URL("$base/ping").openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 5000
+            readTimeout = 5000
+        }
+        val body = try {
+            conn.inputStream.bufferedReader().use { it.readText() }
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn.disconnect()
+        }
+        val remote = try {
+            org.json.JSONObject(body ?: return).optString("version").ifBlank { null }
+        } catch (_: Exception) {
+            null
+        } ?: return
+        if (UpdateChecker.isNewer(remote, BuildConfig.VERSION_NAME) &&
+            Prefs.getLastNotifyVer(this) != remote
+        ) {
+            Prefs.setLastNotifyVer(this, remote)
+            mainHandler.post { notifyUpdate(remote) }
+        }
+    }
+
+    /** 通知栏提醒新版本；点击通知直接下载并拉起安装 */
+    private fun notifyUpdate(version: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                appendLog("发现新版本 v$version（无通知权限，打开 App 即可更新）")
+                return
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel("update", "版本更新", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+                )
+            }
+            val pi = android.app.PendingIntent.getActivity(
+                this, 1001,
+                Intent(this, MainActivity::class.java)
+                    .putExtra("auto_update", true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val n = if (Build.VERSION.SDK_INT >= 26) {
+                android.app.Notification.Builder(this, "update")
+            } else {
+                @Suppress("DEPRECATION")
+                android.app.Notification.Builder(this)
+            }
+                .setContentTitle("发现新版本 v$version")
+                .setContentText("点此立即更新红果广告跳过")
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build()
+            nm.notify(2001, n)
+            appendLog("已发送更新提醒通知：v$version")
+        } catch (e: Exception) {
+            appendLog("更新通知发送失败：${e.message}")
+        }
     }
 
     override fun onDestroy() {

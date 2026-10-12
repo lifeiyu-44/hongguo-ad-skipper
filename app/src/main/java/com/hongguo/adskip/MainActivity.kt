@@ -1,6 +1,7 @@
 package com.hongguo.adskip
 
 import android.content.Intent
+import android.os.Build
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.os.Handler
@@ -67,6 +68,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // 从「发现新版本」通知栏点进来：直接开始下载安装
+        if (intent?.getBooleanExtra("auto_update", false) == true) {
+            UpdateChecker.downloadLatest(this)
+        }
 
         val statusPill = findViewById<TextView>(R.id.statusPill)
         val stateText = findViewById<TextView>(R.id.stateText)
@@ -175,6 +181,14 @@ class MainActivity : AppCompatActivity() {
                 else ->
                     Toast.makeText(this, R.string.quick_report_busy, Toast.LENGTH_SHORT).show()
             }
+        }
+
+        // Android 13+ 通知权限：用于「发现新版本」通知栏提醒（拒绝也不影响其他功能）
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2001)
         }
 
         // ---- 账号（可选）：注册/登录后反馈自动关联邮箱，不注册不影响使用 ----

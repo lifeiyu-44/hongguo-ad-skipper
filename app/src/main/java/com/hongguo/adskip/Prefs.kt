@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_URL_MIGRATED = "feedback_url_migrated_v1"
     private const val KEY_AUTH_TOKEN = "auth_token"
     private const val KEY_AUTH_EMAIL = "auth_email"
+    private const val KEY_LAST_NOTIFY_VER = "last_notify_ver"
     private const val KEY_FB_Y = "feedback_btn_y"
     private const val KEY_VISUAL_FALLBACK = "visual_ad_fallback"
 
@@ -122,4 +123,11 @@ object Prefs {
 
     fun clearAuth(ctx: Context) =
         sp(ctx).edit().remove(KEY_AUTH_EMAIL).remove(KEY_AUTH_TOKEN).apply()
+
+    /** 更新提醒去重：同版本只通知一次 */
+    fun getLastNotifyVer(ctx: Context): String =
+        sp(ctx).getString(KEY_LAST_NOTIFY_VER, null) ?: ""
+
+    fun setLastNotifyVer(ctx: Context, v: String) =
+        sp(ctx).edit().putString(KEY_LAST_NOTIFY_VER, v).apply()
 }

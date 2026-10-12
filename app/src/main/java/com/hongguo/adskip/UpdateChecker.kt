@@ -25,7 +25,7 @@ object UpdateChecker {
     private var checking = false
 
     /** 从上报地址推导服务根地址：https://ip:8443/report -> https://ip:8443（保留原协议） */
-    private fun baseUrl(ctx: Context): String? {
+    fun baseUrl(ctx: Context): String? {
         return try {
             val u = URL(Prefs.getFeedbackUrl(ctx))
             "${u.protocol}://${u.host}${if (u.port == -1) "" else ":${u.port}"}"
@@ -35,7 +35,7 @@ object UpdateChecker {
     }
 
     /** 版本号比较：a(1.22) > b(1.21) 返回 true */
-    private fun isNewer(a: String, b: String): Boolean {
+    fun isNewer(a: String, b: String): Boolean {
         val pa = a.trim().removePrefix("v").split(".").mapNotNull { it.toIntOrNull() }
         val pb = b.trim().removePrefix("v").split(".").mapNotNull { it.toIntOrNull() }
         for (i in 0 until maxOf(pa.size, pb.size)) {
@@ -83,6 +83,15 @@ object UpdateChecker {
                 }
             }
         }.start()
+    }
+
+    /** 供通知栏等入口直接下载最新版（点击通知时调用） */
+    fun downloadLatest(ctx: Context) {
+        val base = baseUrl(ctx) ?: run {
+            toast(ctx, "上报地址无效，无法下载更新")
+            return
+        }
+        downloadAndInstall(ctx, "$base/update/apk")
     }
 
     private fun showUpdateDialog(ctx: Context, version: String, base: String) {
