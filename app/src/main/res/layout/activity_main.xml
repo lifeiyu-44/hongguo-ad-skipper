@@ -182,6 +182,13 @@
                     android:layout_height="wrap_content"
                     android:max="25000" />
 
+                <!-- 分区：监测应用 -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:background="#1A000000" />
+
                 <TextView
                     android:id="@+id/targetsText"
                     android:layout_width="match_parent"
@@ -255,6 +262,21 @@
                         android:text="@string/btn_discover" />
                 </LinearLayout>
 
+                <!-- 分区：反馈与更新 -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:background="#1A000000" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/section_feedback"
+                    android:textColor="#77777F"
+                    android:textSize="12sp" />
+
                 <Button
                     android:id="@+id/btnCaptureAuth"
                     style="?attr/materialButtonOutlinedStyle"
@@ -316,10 +338,42 @@
                     android:layout_marginTop="8dp"
                     android:orientation="vertical">
 
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/toggleAccMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:checkedButton="@id/btnModeLogin"
+                        app:selectionRequired="true"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnModeLogin"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:minHeight="0dp"
+                            android:paddingTop="6dp"
+                            android:paddingBottom="6dp"
+                            android:text="@string/account_mode_login" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnModeReg"
+                            style="?attr/materialButtonOutlinedStyle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:minHeight="0dp"
+                            android:paddingTop="6dp"
+                            android:paddingBottom="6dp"
+                            android:text="@string/account_mode_reg" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
                     <EditText
                         android:id="@+id/editAccEmail"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
                         android:hint="@string/account_email_hint"
                         android:importantForAutofill="no"
                         android:inputType="textEmailAddress"
@@ -347,7 +401,8 @@
                         android:inputType="number"
                         android:maxLength="6"
                         android:maxLines="1"
-                        android:textSize="13sp" />
+                        android:textSize="13sp"
+                        android:visibility="gone" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -365,18 +420,19 @@
                             android:paddingTop="6dp"
                             android:paddingEnd="16dp"
                             android:paddingBottom="6dp"
-                            android:text="@string/account_btn_send_code" />
+                            android:text="@string/account_btn_send_code"
+                            android:visibility="gone" />
 
                         <Button
                             android:id="@+id/btnAccLogin"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="8dp"
+                            android:layout_marginStart="0dp"
                             android:layout_weight="1"
                             android:minHeight="0dp"
                             android:paddingTop="6dp"
                             android:paddingBottom="6dp"
-                            android:text="@string/account_btn_login" />
+                            android:text="@string/account_mode_login" />
                     </LinearLayout>
                 </LinearLayout>
 

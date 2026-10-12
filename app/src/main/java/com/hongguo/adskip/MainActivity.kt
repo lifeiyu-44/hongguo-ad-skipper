@@ -240,10 +240,22 @@ class MainActivity : AppCompatActivity() {
             }.start()
         }
 
+        // ---- 登录 / 注册：两种模式分开，各自独立的按钮与字段 ----
+        val toggleAccMode = findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggleAccMode)
+        fun isRegisterMode() = toggleAccMode.checkedButtonId == R.id.btnModeReg
+        fun applyAccMode() {
+            val reg = isRegisterMode()
+            editAccCode.visibility = if (reg) View.VISIBLE else View.GONE
+            btnSendCode.visibility = if (reg) View.VISIBLE else View.GONE
+            btnAccLogin.text = getString(if (reg) R.string.account_mode_reg else R.string.account_mode_login)
+        }
+        toggleAccMode.addOnButtonCheckedListener { _, _, _ -> applyAccMode() }
+        applyAccMode()
+
         btnSendCode.setOnClickListener {
             val email = editAccEmail.text.toString().trim()
             if (email.isBlank()) {
-                Toast.makeText(this, "请先填邮箱", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, R.string.account_need_email, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             btnSendCode.isEnabled = false
@@ -254,10 +266,9 @@ class MainActivity : AppCompatActivity() {
                     if (r.ok) {
                         Toast.makeText(this, R.string.account_code_sent, Toast.LENGTH_LONG).show()
                     } else {
-                        val hint = when (r.error) {
-                            "smtp_not_configured" -> "服务器未配置邮箱验证码"
-                            else -> r.error
-                        }
+                        val hint = if (r.error == "smtp_not_configured") {
+                            getString(R.string.account_smtp_missing_short)
+                        } else r.error
                         Toast.makeText(this, getString(R.string.account_fail_fmt, hint), Toast.LENGTH_LONG).show()
                     }
                 }
@@ -268,22 +279,21 @@ class MainActivity : AppCompatActivity() {
             val email = editAccEmail.text.toString().trim()
             val pass = editAccPass.text.toString()
             if (email.isBlank() || pass.isBlank()) {
-                Toast.makeText(this, "请填邮箱和密码", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, R.string.account_need_email_pass, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val registerMode = isRegisterMode()
+            if (registerMode && editAccCode.text.toString().trim().isBlank()) {
+                Toast.makeText(this, R.string.account_need_fill, Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
             btnAccLogin.isEnabled = false
             Thread {
-                // 先尝试登录；未注册则走注册（需验证码）
-                var r = AccountApi.login(this, email, pass)
-                var registered = false
-                if (!r.ok && r.error == "invalid") {
-                    val code = editAccCode.text.toString().trim()
-                    if (code.isNotBlank()) {
-                        r = AccountApi.register(this, email, pass, code)
-                        registered = r.ok
-                    }
+                val result = if (registerMode) {
+                    AccountApi.register(this, email, pass, editAccCode.text.toString().trim())
+                } else {
+                    AccountApi.login(this, email, pass)
                 }
-                val result = r
                 runOnUiThread {
                     btnAccLogin.isEnabled = true
                     when {
@@ -292,10 +302,16 @@ class MainActivity : AppCompatActivity() {
                             refreshAccountUi()
                             Toast.makeText(
                                 this,
-                                if (registered) R.string.account_reg_ok else R.string.account_login_ok,
+                                if (registerMode) R.string.account_reg_ok else R.string.account_login_ok,
                                 Toast.LENGTH_LONG
                             ).show()
                         }
+                        // 登录模式：账号不存在或密码错误
+                        result.error == "invalid" ->
+                            Toast.makeText(this, R.string.account_login_fail_hint, Toast.LENGTH_LONG).show()
+                        // 注册模式：邮箱已被注册
+                        result.error == "email_taken" ->
+                            Toast.makeText(this, R.string.account_email_taken_hint, Toast.LENGTH_LONG).show()
                         result.error == "bad_code" -> {
                             // 输错后清空，提示只认最新一封邮件里的 6 位数字
                             editAccCode.setText("")
@@ -306,10 +322,10 @@ class MainActivity : AppCompatActivity() {
                             }
                             Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                         }
-                        result.error == "invalid" ->
-                            Toast.makeText(this, R.string.account_need_code, Toast.LENGTH_LONG).show()
                         result.error == "smtp_not_configured" ->
-                            Toast.makeText(this, getString(R.string.account_fail_fmt, "服务器未配置邮箱验证码"), Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, R.string.account_smtp_missing, Toast.LENGTH_LONG).show()
+                        result.error == "disabled" ->
+                            Toast.makeText(this, getString(R.string.account_fail_fmt, getString(R.string.account_disabled)), Toast.LENGTH_LONG).show()
                         else ->
                             Toast.makeText(this, getString(R.string.account_fail_fmt, result.error), Toast.LENGTH_LONG).show()
                     }
