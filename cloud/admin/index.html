@@ -5,69 +5,117 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>红果广告跳过 · 云端后台</title>
 <style>
-  :root { --line:#e3e6ea; --txt:#222; --sub:#777; --main:#e0503c; --bg:#f5f6f8; }
+  :root {
+    --line:#e4e7ec; --txt:#1a2233; --sub:#8a93a6; --main:#e0503c; --main-h:#c9402e;
+    --bg:#f3f5f8; --card:#fff; --ok:#137333; --okbg:#e6f4ea; --err:#b3261e; --errbg:#fdeceb;
+  }
   * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family:"Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--txt); }
-  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px; margin:16px 0; }
-  h1 { font-size:20px; margin-bottom:4px; }
-  h2 { font-size:16px; margin-bottom:12px; }
-  .sub { color:var(--sub); font-size:12px; }
-  .wrap { max-width:960px; margin:0 auto; padding:24px 16px; }
-  input,button,select { font-size:14px; border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
-  input { width:100%; }
-  button { background:var(--main); color:#fff; border:none; cursor:pointer; padding:8px 16px; }
-  button.ghost { background:#fff; color:var(--txt); border:1px solid var(--line); }
-  button:disabled { opacity:.5; cursor:default; }
+  html,body { height:100%; }
+  body {
+    font-family:"Microsoft YaHei",-apple-system,"Segoe UI",system-ui,sans-serif;
+    background:var(--bg); color:var(--txt); font-size:14px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1000px; margin:0 auto; padding:28px 16px 60px; }
+  .card {
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:24px; margin:14px 0; box-shadow:0 1px 3px rgba(16,24,40,.05);
+  }
+  h1 { font-size:19px; font-weight:600; letter-spacing:.3px; }
+  h2 { font-size:15px; font-weight:600; margin:22px 0 10px; }
+  h2:first-child { margin-top:0; }
+  .sub { color:var(--sub); font-size:12.5px; }
+  .head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+  input,button,select {
+    font-size:14px; border:1px solid var(--line); border-radius:8px; padding:9px 12px;
+    background:#fff; color:var(--txt); outline:none; transition:border-color .15s;
+  }
+  input:focus { border-color:var(--main); }
+  button { cursor:pointer; font-weight:500; }
+  button.primary { background:var(--main); color:#fff; border-color:var(--main); }
+  button.primary:hover { background:var(--main-h); }
+  button.ghost { background:#fff; }
+  button.ghost:hover { border-color:var(--sub); }
+  button:disabled { opacity:.45; cursor:default; }
   .row { display:flex; gap:10px; margin:10px 0; flex-wrap:wrap; align-items:center; }
-  .tabs { display:flex; gap:6px; margin:14px 0; flex-wrap:wrap; }
-  .tabs button { background:#fff; color:var(--txt); border:1px solid var(--line); }
-  .tabs button.on { background:var(--main); color:#fff; border-color:var(--main); }
+  .row.tight { margin:6px 0; }
+  .grow { flex:1; min-width:200px; }
+  .tabs { display:flex; gap:8px; margin:18px 0 4px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:0; }
+  .tabs button {
+    background:transparent; border:none; border-bottom:2px solid transparent; color:var(--sub);
+    border-radius:8px 8px 0 0; padding:9px 16px; font-size:14px;
+  }
+  .tabs button.on { color:var(--main); border-bottom-color:var(--main); font-weight:600; }
+  .table-wrap { overflow-x:auto; margin-top:6px; border:1px solid var(--line); border-radius:10px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--sub); font-weight:normal; }
-  .msg { padding:8px 10px; border-radius:6px; font-size:13px; margin:8px 0; }
-  .msg.err { background:#fdeceb; color:#b3261e; }
-  .msg.ok { background:#e6f4ea; color:#137333; }
-  .stats { display:flex; gap:14px; flex-wrap:wrap; }
-  .stat { flex:1; min-width:140px; background:#fafafa; border:1px solid var(--line); border-radius:8px; padding:14px; }
-  .stat b { font-size:26px; display:block; }
-  pre { background:#fafafa; border:1px solid var(--line); border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-all; font-size:12.5px; }
-  img.shot { max-width:100%; border:1px solid var(--line); border-radius:6px; }
-  .badge { display:inline-block; font-size:11px; padding:1px 8px; border-radius:99px; background:#eee; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; white-space:nowrap; }
+  tr:last-child td { border-bottom:none; }
+  th { color:var(--sub); font-weight:500; background:#fafbfc; }
+  tbody tr:hover { background:#fafbfc; }
+  td.wrap-cell { white-space:normal; max-width:360px; }
+  .msg { padding:10px 14px; border-radius:8px; font-size:13px; margin:8px 0; }
+  .msg.err { background:var(--errbg); color:var(--err); }
+  .msg.ok { background:var(--okbg); color:var(--ok); }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:8px; }
+  .stat { background:#fafbfc; border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .stat b { font-size:26px; font-weight:700; display:block; line-height:1.3; }
+  .badge { display:inline-block; font-size:11px; padding:2px 10px; border-radius:99px; background:#eef0f4; color:var(--sub); }
   .badge.admin { background:#fde8d7; color:#a0410d; }
-  .badge.on { background:#e6f4ea; color:#137333; }
-  .pager { display:flex; gap:8px; align-items:center; margin-top:10px; font-size:13px; }
-  .hidden { display:none; }
+  .badge.on { background:var(--okbg); color:var(--ok); }
+  pre {
+    background:#fafbfc; border:1px solid var(--line); border-radius:10px; padding:14px;
+    white-space:pre-wrap; word-break:break-all; font-size:12.5px; line-height:1.7;
+    font-family:Consolas,Menlo,monospace; max-height:260px; overflow-y:auto;
+  }
+  .shot-box { text-align:center; margin-bottom:12px; }
+  img.shot {
+    max-width:100%; max-height:72vh; object-fit:contain; border:1px solid var(--line);
+    border-radius:10px; cursor:zoom-in; background:#fafbfc;
+  }
+  .pager { display:flex; gap:10px; align-items:center; margin-top:12px; font-size:13px; color:var(--sub); }
+  .hidden { display:none !important; }
+
+  /* 详情弹窗 */
+  .modal { position:fixed; inset:0; background:rgba(15,20,30,.55); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal-card {
+    background:#fff; border-radius:16px; max-width:880px; width:100%; max-height:90vh;
+    overflow-y:auto; padding:22px 24px; box-shadow:0 20px 60px rgba(0,0,0,.25);
+  }
+  .modal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:6px; }
+  .meta { font-size:12.5px; color:var(--sub); margin:2px 0 14px; }
+  .meta b { color:var(--txt); font-weight:600; }
+
+  /* 登录卡片居中 */
+  #authBox { max-width:430px; margin:8vh auto 0; }
+  .auth-tabs { display:flex; gap:8px; margin:16px 0 4px; }
+  .auth-tabs button { flex:1; }
+  .auth-tabs button.on { background:var(--main); color:#fff; border-color:var(--main); }
+  code.k { background:#eef0f4; border-radius:6px; padding:2px 8px; font-size:12.5px; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <!-- 登录/注册 -->
+  <!-- 登录（管理端不开放注册，注册请在 App 内完成） -->
   <div id="authBox" class="card">
     <h1>红果广告跳过 · 云端后台</h1>
-    <div class="sub">App 缺陷报告 · 版本发布 · 用户管理</div>
-    <div class="tabs">
-      <button id="tabLogin" class="on" onclick="switchAuth('login')">登录</button>
-      <button id="tabReg" onclick="switchAuth('reg')">注册</button>
-    </div>
+    <div class="sub">缺陷报告 · 版本发布 · 用户管理</div>
     <div id="msgAuth" class="msg err hidden"></div>
-    <div class="row"><input id="aEmail" placeholder="邮箱" autocomplete="username"></div>
-    <div class="row"><input id="aPass" type="password" placeholder="密码（至少8位）" autocomplete="current-password"></div>
-    <div class="row hidden" id="rowCode"><input id="aCode" placeholder="邮箱验证码"></div>
-    <div class="row">
-      <button id="btnSendCode" class="ghost hidden" onclick="sendCode()">发送验证码</button>
-      <button id="btnAuth" onclick="doAuth()">登录</button>
-    </div>
-    <div class="sub">验证码邮件发送失败或未配置 SMTP 时，可直接注册（仅邮箱+密码）。</div>
+    <div class="row tight"><input id="aEmail" class="grow" placeholder="邮箱" autocomplete="username"></div>
+    <div class="row tight"><input id="aPass" class="grow" type="password" placeholder="密码" autocomplete="current-password"></div>
+    <div class="row tight"><button class="primary grow" onclick="doAuth()">登录</button></div>
+    <div class="sub">账号在 App 内注册（需邮箱验证码）；管理员初始账号见部署记录。</div>
   </div>
 
   <!-- 主界面 -->
   <div id="mainBox" class="hidden">
     <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div><h1>红果广告跳过 · 云端后台</h1><div class="sub" id="whoami"></div></div>
-        <button class="ghost" onclick="logout()">退出</button>
+      <div class="head">
+        <div>
+          <h1>红果广告跳过 · 云端后台</h1>
+          <div class="sub" id="whoami"></div>
+        </div>
+        <button class="ghost" onclick="logout()">退出登录</button>
       </div>
       <div class="tabs">
         <button id="t-overview" class="on" onclick="switchTab('overview')">概览</button>
@@ -81,10 +129,15 @@
 
       <div id="p-reports" class="hidden">
         <div class="row">
-          <input id="rq" placeholder="搜索报告内容…" style="flex:1">
-          <button onclick="loadReports(1)">搜索</button>
+          <input id="rq" class="grow" placeholder="搜索报告内容…">
+          <button class="primary" onclick="loadReports(1)">搜索</button>
         </div>
-        <table id="rTable"><thead><tr><th>时间</th><th>版本</th><th>来源IP</th><th>摘要</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="table-wrap">
+          <table id="rTable">
+            <thead><tr><th>时间</th><th>版本</th><th>来源 IP</th><th>摘要</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
         <div class="pager">
           <button class="ghost" onclick="pageReports(-1)">上一页</button>
           <span id="rPage"></span>
@@ -94,26 +147,49 @@
 
       <div id="p-versions" class="hidden">
         <h2>上传新版本</h2>
-        <div class="row"><input id="vVer" placeholder="版本号，如 1.35" style="width:160px"><input id="vNote" placeholder="更新说明（可选）"></div>
-        <div class="row"><input type="file" id="vFile" accept=".apk"></div>
-        <div class="row"><button onclick="uploadVersion()">上传</button><span class="sub" id="vUp"></span></div>
-        <h2 style="margin-top:18px">版本列表</h2>
-        <table id="vTable"><thead><tr><th>版本</th><th>说明</th><th>大小</th><th>时间</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="row tight"><input id="vVer" placeholder="版本号，如 1.35.2" style="width:180px"><input id="vNote" class="grow" placeholder="更新说明（可选）"></div>
+        <div class="row tight"><input type="file" id="vFile" accept=".apk" class="grow"></div>
+        <div class="row tight"><button class="primary" onclick="uploadVersion()">上传</button><span class="sub" id="vUp"></span></div>
+        <h2>版本列表</h2>
+        <div class="table-wrap">
+          <table id="vTable">
+            <thead><tr><th>版本</th><th>说明</th><th>大小</th><th>时间</th><th>状态</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
 
       <div id="p-users" class="hidden">
         <h2>用户列表</h2>
-        <table id="uTable"><thead><tr><th>邮箱</th><th>角色</th><th>注册时间</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
-        <h2 style="margin-top:18px">修改我的密码</h2>
-        <div class="row"><input id="pOld" type="password" placeholder="当前密码" style="flex:1"><input id="pNew" type="password" placeholder="新密码（至少8位）" style="flex:1"><button onclick="changePw()">修改</button></div>
+        <div class="table-wrap">
+          <table id="uTable">
+            <thead><tr><th>邮箱</th><th>角色</th><th>注册时间</th><th>状态</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h2>修改我的密码</h2>
+        <div class="row tight">
+          <input id="pOld" type="password" placeholder="当前密码" class="grow">
+          <input id="pNew" type="password" placeholder="新密码（至少8位）" class="grow">
+          <button class="primary" onclick="changePw()">修改</button>
+        </div>
       </div>
     </div>
+  </div>
+</div>
 
-    <!-- 报告详情 -->
-    <div id="detailBox" class="card hidden">
-      <div class="row" style="justify-content:space-between"><h2 id="dTitle"></h2><button class="ghost" onclick="hideDetail()">返回列表</button></div>
-      <div id="dShot"></div>
-      <pre id="dText"></pre>
+<!-- 报告详情弹窗 -->
+<div id="detailModal" class="modal hidden" onclick="if(event.target===this)hideDetail()">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><h2 style="margin:0">缺陷报告详情</h2></div>
+      <button class="ghost" onclick="hideDetail()">关闭</button>
+    </div>
+    <div class="meta" id="dMeta"></div>
+    <div class="shot-box" id="dShot"></div>
+    <pre id="dText"></pre>
+    <div class="row" style="justify-content:flex-end; margin-top:12px">
+      <button class="ghost" onclick="delReport(currentDetailId)">删除该报告</button>
     </div>
   </div>
 </div>
@@ -122,6 +198,8 @@
 const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem('hg_token') || '';
 let rPageNow = 1;
+let currentDetailId = 0;
+let shotUrl = null; // 上一次截图的 blob URL，切换前释放
 
 function authHeaders() { return { 'Authorization': 'Bearer ' + token }; }
 function showMsg(box, text, ok) {
@@ -139,59 +217,29 @@ async function api(path, opts) {
   return { status: r.status, data: j || {} };
 }
 
-/* ---------- 认证 ---------- */
-let authMode = 'login';
-let codeRequired = false;
-
-async function initAuth() {
-  const r = await fetch('/api/config');
-  const j = await r.json();
-  codeRequired = !!j.codeRequired;
-}
-function switchAuth(m) {
-  authMode = m;
-  $('tabLogin').className = m === 'login' ? 'on' : '';
-  $('tabReg').className = m === 'reg' ? 'on' : '';
-  $('btnAuth').textContent = m === 'login' ? '登录' : '注册';
-  $('rowCode').className = 'row' + (m === 'reg' && codeRequired ? '' : ' hidden');
-  $('btnSendCode').className = 'ghost' + (m === 'reg' && codeRequired ? '' : ' hidden');
-}
-async function sendCode() {
-  const email = $('aEmail').value.trim();
-  if (!email) { showMsg('msgAuth', '请先填邮箱', false); return; }
-  $('btnSendCode').disabled = true;
-  const r = await api('/api/auth/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-  $('btnSendCode').disabled = false;
-  if (r.data.ok) {
-    showMsg('msgAuth', '验证码已发送，请查收（60秒内勿重复发送）', true);
-    let s = 60;
-    const t = setInterval(() => { $('btnSendCode').textContent = s-- + 's'; if (s <= 0) { clearInterval(t); $('btnSendCode').textContent = '发送验证码'; } }, 1000);
-  } else {
-    showMsg('msgAuth', '发送失败：' + (r.data.error || r.status) + '，可直接注册（不填验证码）', false);
-  }
-}
+/* ---------- 认证（管理端仅登录，注册在 App 内） ---------- */
 async function doAuth() {
   const email = $('aEmail').value.trim();
   const pass = $('aPass').value;
   if (!email || !pass) { showMsg('msgAuth', '请填邮箱和密码', false); return; }
-  const body = { email, password: pass };
-  if (authMode === 'reg') body.code = $('aCode').value.trim();
-  const r = await api('/api/auth/' + authMode, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const r = await api('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pass }) });
   if (r.data.ok && r.data.token) {
     token = r.data.token;
     localStorage.setItem('hg_token', token);
     enterMain();
   } else {
-    const map = { email_taken: '该邮箱已注册，请直接登录', bad_code: '验证码错误或已过期', bad_email_or_password: '邮箱格式或密码（至少8位）不合法', invalid: '邮箱或密码不正确', disabled: '账号已被停用', too_many: '操作太频繁，稍后再试' };
+    const map = { invalid: '邮箱或密码不正确', disabled: '账号已被停用', too_many: '操作太频繁，稍后再试' };
     showMsg('msgAuth', map[r.data.error] || ('失败：' + (r.data.error || r.status)), false);
   }
 }
+$('aPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') doAuth(); });
 async function logout(expired) {
   if (!expired) await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   token = '';
   localStorage.removeItem('hg_token');
   $('mainBox').className = 'hidden';
   $('authBox').className = 'card';
+  $('authBox').style.maxWidth = '430px';
   if (expired) showMsg('msgAuth', '登录已过期，请重新登录', false);
 }
 
@@ -227,6 +275,7 @@ async function loadStats() {
 }
 function stat(big, label) { return '<div class="stat"><b>' + big + '</b><span class="sub">' + label + '</span></div>'; }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmtTime(s) { try { return new Date(s).toLocaleString('zh-CN', { hour12: false }); } catch (_) { return s; } }
 
 /* ---------- 报告 ---------- */
 async function loadReports(page) {
@@ -236,29 +285,62 @@ async function loadReports(page) {
   if (!r.data.ok) return;
   const tb = $('rTable').querySelector('tbody');
   tb.innerHTML = (r.data.items || []).map((x) =>
-    '<tr><td>' + new Date(x.created_at).toLocaleString() + '</td><td>' + (x.app_version ? 'v' + x.app_version : '—') +
-    '</td><td class="sub">' + esc(x.ip) + '</td><td>' + esc(x.summary) + '</td>' +
-    '<td><button class="ghost" onclick="showDetail(' + x.id + ')">详情</button> ' +
-    '<button class="ghost" onclick="delReport(' + x.id + ')">删除</button></td></tr>'
-  ).join('') || '<tr><td colspan="5" class="sub">暂无报告</td></tr>';
-  $('rPage').textContent = '第 ' + r.data.page + ' / ' + Math.max(1, Math.ceil(r.data.total / r.data.size)) + ' 页，共 ' + r.data.total + ' 条';
+    '<tr>' +
+    '<td>' + fmtTime(x.created_at) + '</td>' +
+    '<td>' + (x.app_version ? '<code class="k">v' + esc(x.app_version) + '</code>' : '<span class="sub">—</span>') + '</td>' +
+    '<td class="sub">' + esc(x.ip) + (x.user_email ? '<br><span class="badge">' + esc(x.user_email) + '</span>' : '') + '</td>' +
+    '<td class="wrap-cell" title="' + esc(x.summary) + '">' + esc(x.summary) + '</td>' +
+    '<td><button class="ghost" onclick="showDetail(' + x.id + ')">详情</button></td>' +
+    '</tr>'
+  ).join('') || '<tr><td colspan="5" class="sub" style="text-align:center;padding:24px">暂无报告</td></tr>';
+  $('rPage').textContent = '第 ' + r.data.page + ' / ' + Math.max(1, Math.ceil(r.data.total / r.data.size)) + ' 页 · 共 ' + r.data.total + ' 条';
 }
 function pageReports(d) { loadReports(Math.max(1, rPageNow + d)); }
+
 async function showDetail(id) {
   const r = await api('/api/admin/reports/detail?id=' + id);
   if (!r.data.ok) return;
+  currentDetailId = id;
   const x = r.data.report;
-  $('dTitle').textContent = new Date(x.created_at).toLocaleString() + (x.app_version ? ' · v' + x.app_version : '') + ' · ' + x.ip;
-  $('dShot').innerHTML = x.has_screenshot ? '<img class="shot" src="/api/admin/reports/file?id=' + id + '&kind=screenshot" loading="lazy">' : '<div class="sub">无截图</div>';
+  $('dMeta').innerHTML =
+    '时间 <b>' + fmtTime(x.created_at) + '</b> · ' +
+    'App 版本 <b>' + (x.app_version ? 'v' + esc(x.app_version) : '未知') + '</b> · ' +
+    '来源 <b>' + esc(x.ip) + '</b>' +
+    (x.user_email ? ' · 账号 <b>' + esc(x.user_email) + '</b>' : '') +
+    ' · ' + (x.has_screenshot ? '含截图' : '无截图') + ' · 文本 ' + x.text_len + ' 字';
+
+  // 截图必须带登录令牌拉取（<img src> 不带 Authorization 会被 401），
+  // 所以先 fetch 成 blob 再生成对象 URL 显示
+  if (shotUrl) { URL.revokeObjectURL(shotUrl); shotUrl = null; }
+  const box = $('dShot');
+  if (x.has_screenshot) {
+    box.innerHTML = '<div class="sub">截图加载中…</div>';
+    try {
+      const fr = await fetch('/api/admin/reports/file?id=' + id + '&kind=screenshot', { headers: authHeaders() });
+      if (fr.ok) {
+        const blob = await fr.blob();
+        shotUrl = URL.createObjectURL(blob);
+        box.innerHTML = '<img class="shot" src="' + shotUrl + '" alt="截图" onclick="window.open(this.src)">';
+      } else {
+        box.innerHTML = '<div class="sub">截图加载失败（' + fr.status + '）</div>';
+      }
+    } catch (e) {
+      box.innerHTML = '<div class="sub">截图加载失败</div>';
+    }
+  } else {
+    box.innerHTML = '<div class="sub">该报告无截图</div>';
+  }
+
   $('dText').textContent = r.data.text || '(无文本)';
-  $('detailBox').className = 'card';
-  $('detailBox').scrollIntoView({ behavior: 'smooth' });
+  $('detailModal').className = 'modal';
 }
-function hideDetail() { $('detailBox').className = 'card hidden'; }
+function hideDetail() { $('detailModal').className = 'modal hidden'; }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideDetail(); });
+
 async function delReport(id) {
   if (!confirm('确定删除该报告？附件将一并删除。')) return;
   const r = await api('/api/admin/reports?id=' + id, { method: 'DELETE' });
-  if (r.data.ok) { showMsg('msgMain', '已删除', true); loadReports(); setTimeout(() => $('msgMain').className = 'msg err hidden', 1500); }
+  if (r.data.ok) { hideDetail(); loadReports(); showMsg('msgMain', '已删除', true); setTimeout(() => $('msgMain').className = 'msg err hidden', 1500); }
 }
 
 /* ---------- 版本 ---------- */
@@ -267,11 +349,15 @@ async function loadVersions() {
   if (!r.data.ok) return;
   const tb = $('vTable').querySelector('tbody');
   tb.innerHTML = (r.data.items || []).map((x) =>
-    '<tr><td>v' + x.version + '</td><td>' + esc(x.note || '') + '</td><td>' + (x.size / 1048576).toFixed(1) + ' MB</td>' +
-    '<td>' + new Date(x.created_at).toLocaleString() + '</td>' +
+    '<tr>' +
+    '<td><code class="k">v' + x.version + '</code></td>' +
+    '<td class="wrap-cell">' + esc(x.note || '') + '</td>' +
+    '<td>' + (x.size / 1048576).toFixed(1) + ' MB</td>' +
+    '<td class="sub">' + fmtTime(x.created_at) + '</td>' +
     '<td>' + (x.active ? '<span class="badge on">当前下发</span>' : '') + '</td>' +
-    '<td>' + (x.active ? '' : '<button class="ghost" onclick="activateVersion(' + x.id + ')">设为下发版本</button>') + '</td></tr>'
-  ).join('') || '<tr><td colspan="6" class="sub">暂无版本，先上传 APK</td></tr>';
+    '<td>' + (x.active ? '' : '<button class="ghost" onclick="activateVersion(' + x.id + ')">设为下发版本</button>') + '</td>' +
+    '</tr>'
+  ).join('') || '<tr><td colspan="6" class="sub" style="text-align:center;padding:24px">暂无版本，先上传 APK</td></tr>';
 }
 async function uploadVersion() {
   const ver = $('vVer').value.trim();
@@ -300,11 +386,14 @@ async function loadUsers() {
   if (!r.data.ok) return;
   const tb = $('uTable').querySelector('tbody');
   tb.innerHTML = (r.data.items || []).map((x) =>
-    '<tr><td>' + esc(x.email) + '</td><td>' + (x.role === 'admin' ? '<span class="badge admin">管理员</span>' : '用户') + '</td>' +
-    '<td class="sub">' + new Date(x.created_at).toLocaleString() + '</td>' +
+    '<tr>' +
+    '<td>' + esc(x.email) + '</td>' +
+    '<td>' + (x.role === 'admin' ? '<span class="badge admin">管理员</span>' : '用户') + '</td>' +
+    '<td class="sub">' + fmtTime(x.created_at) + '</td>' +
     '<td>' + (x.disabled ? '<span class="badge">已停用</span>' : '正常') + '</td>' +
     '<td><button class="ghost" onclick="updUser(' + x.id + ',{role:\'' + (x.role === 'admin' ? 'user' : 'admin') + '\'})">' + (x.role === 'admin' ? '降为用户' : '升为管理员') + '</button> ' +
-    '<button class="ghost" onclick="updUser(' + x.id + ',{disabled:' + (x.disabled ? 0 : 1) + '})">' + (x.disabled ? '启用' : '停用') + '</button></td></tr>'
+    '<button class="ghost" onclick="updUser(' + x.id + ',{disabled:' + (x.disabled ? 0 : 1) + '})">' + (x.disabled ? '启用' : '停用') + '</button></td>' +
+    '</tr>'
   ).join('');
 }
 async function updUser(id, patch) {
@@ -319,7 +408,7 @@ async function changePw() {
 }
 
 /* ---------- 启动 ---------- */
-initAuth().then(() => { switchAuth('login'); });
+$('aEmail').focus();
 if (token) enterMain();
 </script>
 </body>

@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -80,6 +81,7 @@ class MainActivity : AppCompatActivity() {
         val editFeedbackUrl = findViewById<EditText>(R.id.editFeedbackUrl)
         val btnSaveFeedbackUrl = findViewById<Button>(R.id.btnSaveFeedbackUrl)
         val btnDiscover = findViewById<Button>(R.id.btnDiscover)
+        val btnResetCloud = findViewById<Button>(R.id.btnResetCloud)
         val btnCaptureAuth = findViewById<Button>(R.id.btnCaptureAuth)
         val btnCheckUpdate = findViewById<Button>(R.id.btnCheckUpdate)
         btnCaptureAuth.setOnClickListener {
@@ -139,6 +141,11 @@ class MainActivity : AppCompatActivity() {
             Prefs.setFeedbackUrl(this, editFeedbackUrl.text.toString().trim())
             Toast.makeText(this, R.string.toast_saved, Toast.LENGTH_SHORT).show()
         }
+        btnResetCloud.setOnClickListener {
+            Prefs.setFeedbackUrl(this, Prefs.DEFAULT_FEEDBACK_URL)
+            editFeedbackUrl.setText(Prefs.DEFAULT_FEEDBACK_URL)
+            Toast.makeText(this, R.string.reset_cloud_done, Toast.LENGTH_SHORT).show()
+        }
         btnDiscover.setOnClickListener {
             btnDiscover.isEnabled = false
             Toast.makeText(this, R.string.discover_scanning, Toast.LENGTH_SHORT).show()
@@ -156,6 +163,117 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, R.string.discover_notfound, Toast.LENGTH_LONG).show()
                 }
             }
+        }
+
+        // 一键截图上报缺陷：与红果内悬浮反馈点同一流程，界面里随时可触发
+        findViewById<Button>(R.id.btnQuickReport).setOnClickListener {
+            when {
+                AdSkipService.requestFeedback() ->
+                    Toast.makeText(this, R.string.quick_report_started, Toast.LENGTH_SHORT).show()
+                AdSkipService.running.value != true ->
+                    Toast.makeText(this, R.string.quick_report_no_service, Toast.LENGTH_LONG).show()
+                else ->
+                    Toast.makeText(this, R.string.quick_report_busy, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // ---- 账号（可选）：注册/登录后反馈自动关联邮箱，不注册不影响使用 ----
+        val editAccEmail = findViewById<EditText>(R.id.editAccEmail)
+        val editAccPass = findViewById<EditText>(R.id.editAccPass)
+        val editAccCode = findViewById<EditText>(R.id.editAccCode)
+        val btnSendCode = findViewById<Button>(R.id.btnSendCode)
+        val btnAccLogin = findViewById<Button>(R.id.btnAccLogin)
+        val btnAccLogout = findViewById<Button>(R.id.btnAccLogout)
+        val textAccStatus = findViewById<TextView>(R.id.textAccStatus)
+        val boxAccForm = findViewById<LinearLayout>(R.id.boxAccForm)
+
+        fun refreshAccountUi() {
+            val email = Prefs.getAuthEmail(this)
+            if (email.isNotBlank()) {
+                textAccStatus.text = getString(R.string.account_logged_fmt, email)
+                boxAccForm.visibility = View.GONE
+                btnAccLogout.visibility = View.VISIBLE
+            } else {
+                textAccStatus.setText(R.string.account_hint)
+                boxAccForm.visibility = View.VISIBLE
+                btnAccLogout.visibility = View.GONE
+            }
+        }
+        refreshAccountUi()
+
+        btnSendCode.setOnClickListener {
+            val email = editAccEmail.text.toString().trim()
+            if (email.isBlank()) {
+                Toast.makeText(this, "请先填邮箱", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            btnSendCode.isEnabled = false
+            Thread {
+                val r = AccountApi.sendCode(this, email)
+                runOnUiThread {
+                    btnSendCode.isEnabled = true
+                    if (r.ok) {
+                        Toast.makeText(this, R.string.account_code_sent, Toast.LENGTH_LONG).show()
+                    } else {
+                        val hint = when (r.error) {
+                            "smtp_not_configured" -> "服务器未配置邮箱验证码"
+                            else -> r.error
+                        }
+                        Toast.makeText(this, getString(R.string.account_fail_fmt, hint), Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.start()
+        }
+
+        btnAccLogin.setOnClickListener {
+            val email = editAccEmail.text.toString().trim()
+            val pass = editAccPass.text.toString()
+            if (email.isBlank() || pass.isBlank()) {
+                Toast.makeText(this, "请填邮箱和密码", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            btnAccLogin.isEnabled = false
+            Thread {
+                // 先尝试登录；未注册则走注册（需验证码）
+                var r = AccountApi.login(this, email, pass)
+                var registered = false
+                if (!r.ok && r.error == "invalid") {
+                    val code = editAccCode.text.toString().trim()
+                    if (code.isNotBlank()) {
+                        r = AccountApi.register(this, email, pass, code)
+                        registered = r.ok
+                    }
+                }
+                val result = r
+                runOnUiThread {
+                    btnAccLogin.isEnabled = true
+                    when {
+                        result.ok && result.token != null -> {
+                            Prefs.setAuth(this, email, result.token)
+                            refreshAccountUi()
+                            Toast.makeText(
+                                this,
+                                if (registered) R.string.account_reg_ok else R.string.account_login_ok,
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        result.error == "bad_code" ->
+                            Toast.makeText(this, R.string.account_bad_code, Toast.LENGTH_LONG).show()
+                        result.error == "invalid" ->
+                            Toast.makeText(this, R.string.account_need_code, Toast.LENGTH_LONG).show()
+                        result.error == "smtp_not_configured" ->
+                            Toast.makeText(this, getString(R.string.account_fail_fmt, "服务器未配置邮箱验证码"), Toast.LENGTH_LONG).show()
+                        else ->
+                            Toast.makeText(this, getString(R.string.account_fail_fmt, result.error), Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.start()
+        }
+
+        btnAccLogout.setOnClickListener {
+            Prefs.clearAuth(this)
+            refreshAccountUi()
+            Toast.makeText(this, R.string.account_logout_ok, Toast.LENGTH_SHORT).show()
         }
 
         delayBar.progress = Prefs.getExtraDelayMs(this)

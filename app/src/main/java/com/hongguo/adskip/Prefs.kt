@@ -21,6 +21,8 @@ object Prefs {
     private const val KEY_FB_BTN = "feedback_button"
     private const val KEY_FB_URL = "feedback_url"
     private const val KEY_URL_MIGRATED = "feedback_url_migrated_v1"
+    private const val KEY_AUTH_TOKEN = "auth_token"
+    private const val KEY_AUTH_EMAIL = "auth_email"
     private const val KEY_FB_Y = "feedback_btn_y"
     private const val KEY_VISUAL_FALLBACK = "visual_ad_fallback"
 
@@ -107,4 +109,17 @@ object Prefs {
 
     fun setVisualAdFallbackEnabled(ctx: Context, v: Boolean) =
         sp(ctx).edit().putBoolean(KEY_VISUAL_FALLBACK, v).apply()
+
+    /** 云端账号（可选）：登录后反馈自动关联邮箱；不登录完全不影响使用 */
+    fun getAuthToken(ctx: Context): String =
+        sp(ctx).getString(KEY_AUTH_TOKEN, null) ?: ""
+
+    fun getAuthEmail(ctx: Context): String =
+        sp(ctx).getString(KEY_AUTH_EMAIL, null) ?: ""
+
+    fun setAuth(ctx: Context, email: String, token: String) =
+        sp(ctx).edit().putString(KEY_AUTH_EMAIL, email).putString(KEY_AUTH_TOKEN, token).apply()
+
+    fun clearAuth(ctx: Context) =
+        sp(ctx).edit().remove(KEY_AUTH_EMAIL).remove(KEY_AUTH_TOKEN).apply()
 }

@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 `);
+// 旧库升级：reports 增加账号列（App 登录后上报可关联）
+try { db.exec('ALTER TABLE reports ADD COLUMN user_email TEXT'); } catch (_) {}
 
 /** 机器用 API Key（X-Api-Key 请求头）：仅授权版本上传/发布，首次启动自动生成 */
 function getApiKey() {
@@ -474,9 +476,15 @@ async function handle(req, res) {
       ensureDir(dir);
       if (reportText) fs.writeFileSync(path.join(dir, '反馈.txt'), reportText, 'utf8');
       if (imageBuf) fs.writeFileSync(path.join(dir, '截图.png'), imageBuf);
+      // 可选：App 登录后携带令牌，报告关联注册账号
+      let userEmail = null;
+      try {
+        const u = userForRequest(req);
+        if (u) userEmail = u.email;
+      } catch (_) {}
       db.prepare(
-        `INSERT INTO reports (ts_dir, ip, app_version, summary, text_len, has_screenshot, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO reports (ts_dir, ip, app_version, summary, text_len, has_screenshot, created_at, user_email)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         ts,
         ip,
@@ -484,12 +492,13 @@ async function handle(req, res) {
         reportText ? reportText.slice(0, 160).replace(/\s+/g, ' ') : '(仅截图)',
         reportText.length,
         imageBuf ? 1 : 0,
-        new Date().toISOString()
+        new Date().toISOString(),
+        userEmail
       );
       log(
         `[收到反馈] 文本 ${reportText.length} 字` +
           (imageBuf ? `，截图 ${imageBuf.length} 字节` : '，无截图') +
-          `（来自 ${ip}${appVersion ? '，v' + appVersion : ''}）`
+          `（来自 ${ip}${appVersion ? '，v' + appVersion : ''}${userEmail ? '，账号 ' + userEmail : ''}）`
       );
       sendJson(res, 200, { ok: true, dir: ts });
     } catch (e) {
@@ -533,6 +542,11 @@ async function handle(req, res) {
     }
 
     if (req.method === 'POST' && pathname === '/api/auth/code') {
+      // 仅 App 端可发验证码（管理端无注册入口）
+      if (String(req.headers['x-client'] || '') !== 'app') {
+        sendJson(res, 403, { ok: false, error: 'app_only' });
+        return;
+      }
       const cfg = smtpConfig();
       if (!cfg) {
         sendJson(res, 400, { ok: false, error: 'smtp_not_configured' });
@@ -562,6 +576,11 @@ async function handle(req, res) {
     }
 
     if (req.method === 'POST' && pathname === '/api/auth/register') {
+      // 仅 App 端可注册（管理端不开注册），且必须验证邮箱验证码
+      if (String(req.headers['x-client'] || '') !== 'app') {
+        sendJson(res, 403, { ok: false, error: 'app_only' });
+        return;
+      }
       let body;
       try { body = await readJson(req); } catch (_) { body = {}; }
       const email = String(body.email || '').trim().toLowerCase();
@@ -575,11 +594,13 @@ async function handle(req, res) {
         sendJson(res, 409, { ok: false, error: 'email_taken' });
         return;
       }
-      if (smtpConfig()) {
-        if (!verifyCode(email, String(body.code || ''))) {
-          sendJson(res, 400, { ok: false, error: 'bad_code' });
-          return;
-        }
+      if (!smtpConfig()) {
+        sendJson(res, 400, { ok: false, error: 'smtp_not_configured' });
+        return;
+      }
+      if (!verifyCode(email, String(body.code || ''))) {
+        sendJson(res, 400, { ok: false, error: 'bad_code' });
+        return;
       }
       const salt = newSalt();
       const r = db

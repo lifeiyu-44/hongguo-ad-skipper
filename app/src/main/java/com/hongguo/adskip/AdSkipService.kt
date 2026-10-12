@@ -131,6 +131,15 @@ class AdSkipService : AccessibilityService() {
             return true
         }
 
+        /**
+         * 从主界面一键触发「截图 + 缺陷上报」：与红果内悬浮反馈点是同一流程，
+         * 供用户在 App 界面里随时提交问题（截图为触发瞬间的当前屏幕）。
+         */
+        fun requestFeedback(): Boolean {
+            val svc = instance ?: return false
+            return svc.onFeedbackTapped()
+        }
+
         fun clearLogs() {
             logs.value = emptyList()
         }
@@ -782,13 +791,14 @@ class AdSkipService : AccessibilityService() {
     // ------------------------------------------------------------------ 一键反馈
 
     /** 悬浮按钮轻点回调：抓取当前页面截图 + 诊断信息，生成反馈并提交 */
-    fun onFeedbackTapped() {
+    fun onFeedbackTapped(): Boolean {
         val now = SystemClock.elapsedRealtime()
         // 冷却 8 秒 + 进行中保护：防止误触导致反复提交、反复弹窗
-        if (feedbackBusy || now - lastReportAt < 8000L) return
+        if (feedbackBusy || now - lastReportAt < 8000L) return false
         lastReportAt = now
         feedbackBusy = true
         mainHandler.post { captureReport() }
+        return true
     }
 
     private fun captureReport() {
@@ -875,25 +885,25 @@ class AdSkipService : AccessibilityService() {
                 }
             }
             appendLog("反馈已生成：${txtFile.name}${if (imgFile != null) "（含截图）" else "（无截图）"}")
-            // 静默上传（自动尝试电脑的多个局域网地址）；
+            // 静默上传（云端服务器，任意网络可用）；
             // 本 App 不含任何分享面板代码，永远不会弹出分享窗口
             uploadWithFallback(imgFile, txtFile) { ok ->
                 FeedbackOverlay.flashResult(ok)
                 if (ok) {
                     Toast.makeText(
                         this,
-                        if (imgFile != null) "反馈已提交到电脑 ✓"
+                        if (imgFile != null) "反馈已提交到云端 ✓"
                         else "已提交（未带截图：请到 App 里点「开启屏幕截图」授权）",
                         Toast.LENGTH_LONG
                     ).show()
                 } else {
-                    appendLog("全部地址上传失败，10 秒后自动重试")
+                    appendLog("上传失败，10 秒后自动重试")
                     mainHandler.postDelayed({
                         uploadWithFallback(imgFile, txtFile) { ok2 ->
                             Toast.makeText(
                                 this,
-                                if (ok2) "反馈已提交到电脑 ✓"
-                                else "上传失败，反馈已保存在手机里（请确认手机连着家里 WiFi）",
+                                if (ok2) "反馈已提交到云端 ✓"
+                                else "上传失败，反馈已保存在手机里（稍后会自动重试，也可检查网络后重试）",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -905,12 +915,18 @@ class AdSkipService : AccessibilityService() {
         }
     }
 
-    /** 依次尝试配置地址与电脑的有线/无线两个局域网地址，任一成功即完成 */
+    /**
+     * 上传优先级：配置地址（默认云端）→ 电脑有线/无线局域网地址 → 局域网扫描。
+     * 云端(https)地址具有「粘性」：局域网兜底成功也不会覆盖它，
+     * 避免在家连一次电脑、出门后地址失效的问题。
+     */
     private fun uploadWithFallback(img: File?, txt: File, onResult: (Boolean) -> Unit) {
+        val configured = Prefs.getFeedbackUrl(this)
+        val cloudSticky = configured.startsWith("https://")
         val candidates = linkedSetOf(
-            Prefs.getFeedbackUrl(this),
-            "http://192.168.5.2:8765/report",   // 有线网卡（优先：当前电脑常用）
-            "http://192.168.5.10:8765/report"   // 无线网卡（备用）
+            configured,
+            "http://192.168.5.2:8765/report",   // 电脑有线（家里局域网备用）
+            "http://192.168.5.10:8765/report"   // 电脑无线（备用）
         ).filter { it.isNotBlank() }
         fun tryNext(list: List<String>) {
             if (list.isEmpty()) {
@@ -918,8 +934,12 @@ class AdSkipService : AccessibilityService() {
                 appendLog("已知地址均不通，开始扫描局域网寻找接收服务…")
                 LanDiscovery.discover { found ->
                     if (found != null) {
-                        appendLog("局域网发现接收服务：$found（已保存）")
-                        Prefs.setFeedbackUrl(this, found)
+                        if (cloudSticky) {
+                            appendLog("局域网发现接收服务：$found（仅本次使用，不覆盖云端地址）")
+                        } else {
+                            appendLog("局域网发现接收服务：$found（已保存）")
+                            Prefs.setFeedbackUrl(this, found)
+                        }
                         uploadReport(found, img, txt) { ok -> onResult(ok) }
                     } else {
                         appendLog("局域网未发现接收服务")
@@ -1024,6 +1044,9 @@ class AdSkipService : AccessibilityService() {
                     connectTimeout = 4000
                     readTimeout = 30000
                     setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                    // 已登录账号时关联报告来源（未登录则匿名，同样可用）
+                    val tok = Prefs.getAuthToken(this@AdSkipService)
+                    if (tok.isNotBlank()) setRequestProperty("X-Auth-Token", tok)
                 }
                 DataOutputStream(conn.outputStream).use { out ->
                     out.writeBytes("--$boundary\r\n")
