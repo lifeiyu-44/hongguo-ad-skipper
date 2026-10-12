@@ -1409,5 +1409,7 @@ class AdSkipService : AccessibilityService() {
     private fun appendLog(msg: String) {
         val line = tsFormat.format(Date()) + "  " + msg
         logs.value = (logs.value + line).takeLast(120)
+        // logcat 镜像：便于 adb 远程排查/模拟器实测（logcat -s AdSkip）
+        android.util.Log.i("AdSkip", msg)
     }
 }

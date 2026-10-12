@@ -20,3 +20,8 @@ receiver/updates/
 
 # 云端服务本地运行产物（不入库）
 cloud/data/
+
+# 本地测试与诊断产物
+.testenv/
+.env_check.*
+.build_output.txt
