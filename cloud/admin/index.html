@@ -122,6 +122,7 @@
         <button id="t-reports" onclick="switchTab('reports')">缺陷报告</button>
         <button id="t-versions" onclick="switchTab('versions')">版本发布</button>
         <button id="t-users" onclick="switchTab('users')">用户</button>
+        <button id="t-smtp" onclick="switchTab('smtp')">邮件设置</button>
       </div>
       <div id="msgMain" class="msg err hidden"></div>
 
@@ -173,6 +174,28 @@
           <input id="pNew" type="password" placeholder="新密码（至少8位）" class="grow">
           <button class="primary" onclick="changePw()">修改</button>
         </div>
+      </div>
+
+      <div id="p-smtp" class="hidden">
+        <h2>发信邮箱设置（App 注册验证码）</h2>
+        <div class="sub" id="smtpStatus" style="margin-bottom:10px">加载中…</div>
+        <div class="row tight">
+          <input id="sHost" class="grow" placeholder="SMTP 服务器，如 smtp.qq.com">
+          <input id="sPort" placeholder="端口" style="width:90px" value="465">
+        </div>
+        <div class="row tight">
+          <input id="sUser" class="grow" placeholder="发信邮箱，如 1446549784@qq.com" autocomplete="off">
+          <input id="sFrom" class="grow" placeholder="发件人显示邮箱（默认同上，可留空）" autocomplete="off">
+        </div>
+        <div class="row tight">
+          <input id="sPass" type="password" class="grow" placeholder="邮箱授权码（不是登录密码；留空=不修改）" autocomplete="new-password">
+        </div>
+        <div class="row tight">
+          <button class="primary" onclick="saveSmtp()">保存配置</button>
+          <input id="sTestTo" class="grow" placeholder="测试收件邮箱（留空=发到发信邮箱）">
+          <button class="ghost" onclick="testSmtp()">发送测试邮件</button>
+        </div>
+        <div class="sub">QQ 邮箱授权码获取：网页版QQ邮箱 → 设置 → 账户 → 「POP3/IMAP/SMTP服务」→ 开启 → 生成授权码（16位）。配置保存后立即生效，无需重启。</div>
       </div>
     </div>
   </div>
@@ -252,10 +275,11 @@ async function enterMain() {
   const isAdmin = r.data.role === 'admin';
   $('t-versions').style.display = isAdmin ? '' : 'none';
   $('t-users').style.display = isAdmin ? '' : 'none';
+  $('t-smtp').style.display = isAdmin ? '' : 'none';
   switchTab('overview');
 }
 function switchTab(t) {
-  for (const x of ['overview', 'reports', 'versions', 'users']) {
+  for (const x of ['overview', 'reports', 'versions', 'users', 'smtp']) {
     $('t-' + x).className = x === t ? 'on' : '';
     $('p-' + x).className = x === t ? '' : 'hidden';
   }
@@ -263,6 +287,7 @@ function switchTab(t) {
   if (t === 'reports') loadReports(1);
   if (t === 'versions') loadVersions();
   if (t === 'users') loadUsers();
+  if (t === 'smtp') loadSmtp();
 }
 async function loadStats() {
   const r = await api('/api/admin/stats');
@@ -405,6 +430,44 @@ async function changePw() {
   const r = await api('/api/auth/password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ old: $('pOld').value, new: $('pNew').value }) });
   if (r.data.ok) { showMsg('msgMain', '密码已修改', true); $('pOld').value = ''; $('pNew').value = ''; setTimeout(() => $('msgMain').className = 'msg err hidden', 2000); }
   else showMsg('msgMain', '修改失败：旧密码不正确或新密码少于8位', false);
+}
+
+/* ---------- 邮件设置 ---------- */
+async function loadSmtp() {
+  const r = await api('/api/admin/smtp');
+  if (!r.data.ok) return;
+  $('sHost').value = r.data.host || 'smtp.qq.com';
+  $('sPort').value = r.data.port || 465;
+  $('sUser').value = r.data.user || '1446549784@qq.com';
+  $('sFrom').value = r.data.from || '';
+  $('sPass').value = '';
+  $('smtpStatus').textContent = r.data.configured
+    ? '当前已配置：' + r.data.user + '（修改授权码请重新粘贴，保存后立即生效）'
+    : '当前未配置：邮箱验证码不可用，App 注册暂不可用';
+}
+async function saveSmtp() {
+  const body = {
+    host: $('sHost').value.trim(),
+    port: parseInt($('sPort').value, 10) || 465,
+    user: $('sUser').value.trim(),
+    from: $('sFrom').value.trim(),
+    pass: $('sPass').value,
+  };
+  if (!body.host || !body.user) { showMsg('msgMain', '请填 SMTP 服务器和发信邮箱', false); return; }
+  const r = await api('/api/admin/smtp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r.data.ok) {
+    showMsg('msgMain', '已保存，可点「发送测试邮件」验证', true);
+    loadSmtp();
+    setTimeout(() => $('msgMain').className = 'msg err hidden', 3000);
+  } else {
+    showMsg('msgMain', '保存失败：' + (r.data.error || r.status) + (r.data.error === 'missing_fields' ? '（首次配置必须填授权码）' : ''), false);
+  }
+}
+async function testSmtp() {
+  showMsg('msgMain', '正在发送测试邮件…', true);
+  const r = await api('/api/admin/smtp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: $('sTestTo').value.trim() }) });
+  if (r.data.ok) showMsg('msgMain', '测试邮件已发送至 ' + r.data.to + '，请查收（含垃圾箱）', true);
+  else showMsg('msgMain', '发送失败：' + (r.data.error || r.status) + (r.data.detail ? '（' + r.data.detail + '）' : ''), false);
 }
 
 /* ---------- 启动 ---------- */

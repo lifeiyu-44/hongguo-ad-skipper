@@ -822,6 +822,66 @@ async function handle(req, res) {
       return;
     }
 
+    if (req.method === 'GET' && pathname === '/api/admin/smtp') {
+      const c = smtpConfig();
+      sendJson(res, 200, {
+        ok: true,
+        configured: !!c,
+        host: c ? c.host : '',
+        port: c ? c.port : 465,
+        // 不回传授权码本身
+        user: c ? c.user : '',
+        from: c ? c.from || c.user : '',
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/smtp') {
+      let body;
+      try { body = await readJson(req); } catch (_) { body = {}; }
+      const host = String(body.host || '').trim();
+      const port = parseInt(body.port || '465', 10) || 465;
+      const user = String(body.user || '').trim();
+      let pass = String(body.pass || '');
+      const from = String(body.from || '').trim() || user;
+      if (!pass) {
+        // 授权码留空 = 保留旧的（仅改其他字段时无需重输）
+        const old = smtpConfig();
+        if (old && old.pass) pass = old.pass;
+      }
+      if (!host || !user || !pass) {
+        sendJson(res, 400, { ok: false, error: 'missing_fields' });
+        return;
+      }
+      ensureDir(CONFIG_DIR);
+      fs.writeFileSync(
+        SMTP_FILE,
+        JSON.stringify({ host, port, user, pass, from }, null, 2),
+        { encoding: 'utf8', mode: 0o600 }
+      );
+      log('[管理] SMTP 配置已更新:', `${host}:${port}`, user);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/smtp/test') {
+      const cfg = smtpConfig();
+      if (!cfg) { sendJson(res, 400, { ok: false, error: 'smtp_not_configured' }); return; }
+      let body;
+      try { body = await readJson(req); } catch (_) { body = {}; }
+      const to = String(body.to || cfg.user).trim();
+      if (!EMAIL_RE.test(to)) { sendJson(res, 400, { ok: false, error: 'bad_email' }); return; }
+      try {
+        await sendMail(to, '红果云端 SMTP 配置测试', '配置成功！收到本邮件说明邮箱验证码功能正常。');
+        log('[邮件] 测试邮件已发送至', to);
+        sendJson(res, 200, { ok: true, to });
+      } catch (e) {
+        log('[邮件] 测试发送失败:', e.message);
+        sendJson(res, 500, { ok: false, error: 'send_failed', detail: String(e.message || e).slice(0, 200) });
+      }
+      return;
+    }
+
     if (req.method === 'GET' && pathname === '/api/admin/apikey') {
       sendJson(res, 200, { ok: true, key: getApiKey() });
       return;
