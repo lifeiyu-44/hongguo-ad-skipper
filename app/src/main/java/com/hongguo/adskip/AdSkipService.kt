@@ -122,7 +122,7 @@ class AdSkipService : AccessibilityService() {
         // ---- 画面型广告兜底（可选功能，默认开启）----
         private const val EMPTY_TREE_CONFIRM_MS = 5000L   // 屏幕几乎读不到文字持续多久判定为画面型广告
         private const val EMPTY_BLIP_GRACE_MS = 3000L     // 闪断宽限：短暂读到文字（界面重绘）不清零计时
-        private const val EMPTY_FLIP_MAX = 2              // 窗口内最多尝试次数（防误翻连环）
+        private const val EMPTY_FLIP_MAX = 4              // 窗口内最多尝试次数（防误翻连环；直播类广告常连续多条，2 次不够）
         private const val EMPTY_FLIP_WINDOW_MS = 300000L  // 次数统计窗口
         private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
 
@@ -457,6 +457,7 @@ class AdSkipService : AccessibilityService() {
             if (!merged.mallPromoAd && f.mallPromoAd) merged.mallPromoAd = true
             merged.textNodeCount += f.textNodeCount
             if (merged.skipNode == null) merged.skipNode = f.skipNode
+            if (merged.backNode == null) merged.backNode = f.backNode
         }
         return merged
     }
@@ -476,6 +477,7 @@ class AdSkipService : AccessibilityService() {
         var textNodeCount: Int = 0          // 屏幕内可读文字节点数（0=画面型广告特征）
         var mallPromoAd: Boolean = false    // 商城推广卡片广告特征（可读文字极少，含"商城好物省心选"）
         var skipNode: AccessibilityNodeInfo? = null
+        var backNode: AccessibilityNodeInfo? = null // 推广页左上角「返回」：上滑无效时的退出通道（仅广告波次内使用）
     }
 
     private fun findAdSignature(root: AccessibilityNodeInfo, nodeLimit: Int): ScanResult {
@@ -578,6 +580,12 @@ class AdSkipService : AccessibilityService() {
             if (result.skipNode == null && (isSkipText(text) || isSkipText(desc))) {
                 result.skipNode = node.findClickableSelfOrParent()
             }
+            // 推广页（品牌直播等）的「返回」是唯一可靠出口：页面中部的直播画面与
+            // 商品墙会吸收上滑手势，导致反复上滑翻不出页面。仅捕获精确的「返回」，
+            // 避免误抓普通页面的「返回首页」等；使用时机由广告决策层把关
+            if (result.backNode == null && ("返回" == text || "返回" == desc)) {
+                result.backNode = node.findClickableSelfOrParent()
+            }
             collectChildren(node, queue)
         }
         // 组装：单节点都匹配不到时，把「数字节点 + 尾部文案节点」就近配对还原倒计时。
@@ -664,9 +672,9 @@ class AdSkipService : AccessibilityService() {
                 ) {
                     emptyFlipTimes.addLast(now)
                     emptySinceAt = now
-                    // 商城推广卡片的下半屏是商品面板（价格/按钮区），从下部起手
-                    // 会被面板拦截导致翻页失败，改为上部起手；纯空屏广告保持下部起手
-                    if (found.mallPromoAd) lastSheetLikely = true
+                    // 空屏一律上部起手：整屏无文字的多为直播/画面型广告，
+                    // 下半屏常是商品面板或直播手势区，从下部起手会被拦截
+                    lastSheetLikely = true
                     appendLog(
                         "屏幕几乎读不到文字，疑似画面型广告（" +
                                 (if (found.mallPromoAd) "商城推广卡片" else "空屏") + "），尝试上滑"
@@ -832,12 +840,24 @@ class AdSkipService : AccessibilityService() {
                         else "本波广告自动跳过超时（45s），已暂停，等广告自然结束"
                     )
                 } else if (found.unlocked) {
-                    // 无倒计时广告的解锁提示：立即上滑
-                    attemptSkip(found.skipNode, "检测到「${found.unlockText ?: "上滑继续观看"}」提示", countdownVisible = false)
+                    // 无倒计时广告的解锁提示：立即上滑。已连滑 2 次仍没翻出去的
+                    // （品牌直播等推广页会吸收上滑手势），改点页面自带的「返回」退出
+                    val exitNode = if (retryCount >= 2) (found.backNode ?: found.skipNode) else found.skipNode
+                    attemptSkip(
+                        exitNode,
+                        "检测到「${found.unlockText ?: "上滑继续观看"}」提示" +
+                                if (exitNode === found.backNode) "（上滑无效，点「返回」退出）" else "",
+                        countdownVisible = false
+                    )
                 } else if (lockToastSeenAt == 0L && now >= deadlineAt) {
                     // 本次扫描已确认无倒计时文字，才执行兜底上滑。
                     // 若本波广告曾被红果明确拒绝（锁定期），一律不盲滑，避免反复顶撞提示
-                    attemptSkip(found.skipNode, "广告等待超时，尝试上滑", countdownVisible = false)
+                    val exitNode = if (retryCount >= 2) (found.backNode ?: found.skipNode) else found.skipNode
+                    attemptSkip(
+                        exitNode,
+                        if (exitNode === found.backNode) "上滑无效，点「返回」退出推广页" else "广告等待超时，尝试上滑",
+                        countdownVisible = false
+                    )
                 }
             }
         }
