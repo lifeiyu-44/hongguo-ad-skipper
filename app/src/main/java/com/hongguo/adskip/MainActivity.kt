@@ -374,7 +374,7 @@ class MainActivity : AppCompatActivity() {
 
         refreshTargetsText(targetsText)
         btnResetTargets.setOnClickListener {
-            Prefs.setTargetPackages(this, setOf(Prefs.DEFAULT_TARGET))
+            Prefs.setTargetPackages(this, Prefs.DEFAULT_TARGETS)
             refreshTargetsText(targetsText)
             Toast.makeText(this, R.string.targets_literal, Toast.LENGTH_SHORT).show()
         }
@@ -480,13 +480,20 @@ class MainActivity : AppCompatActivity() {
     private fun snapFallbackSec(progress: Int): Int = ((progress + 1000) / 1000).coerceIn(1, 28)
 
     private fun refreshTargetsText(tv: TextView) {
-        val pkgs = Prefs.getTargetPackages(this).sorted().joinToString("、")
-        tv.text = getString(R.string.targets_value, pkgs)
+        val names = Prefs.getTargetPackages(this).sorted().joinToString("、") { friendlyAppName(it) }
+        tv.text = getString(R.string.targets_value, names)
+    }
+
+    /** 监测应用的友好名称（界面展示用；未知包名原样显示） */
+    private fun friendlyAppName(pkg: String): String = when (pkg) {
+        Prefs.DEFAULT_TARGET -> "红果短剧"
+        Prefs.TARGET_MANJU -> "红果免费漫剧"
+        else -> pkg
     }
 
     private fun openTargetApp() {
-        // 永远优先打开红果官方包（监测列表可能含历史遗留项，绝不能取"第一个"）
-        val targets = linkedSetOf(Prefs.DEFAULT_TARGET).apply {
+        // 优先红果短剧，其次红果免费漫剧；监测列表可能含历史遗留项，绝不能取"第一个"
+        val targets = linkedSetOf(Prefs.DEFAULT_TARGET, Prefs.TARGET_MANJU).apply {
             addAll(Prefs.getTargetPackages(this@MainActivity))
         }
         for (pkg in targets) {

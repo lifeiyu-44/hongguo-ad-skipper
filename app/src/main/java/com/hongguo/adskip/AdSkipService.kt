@@ -30,7 +30,7 @@ import java.util.Locale
 
 /**
  * 核心无障碍服务，工作流程：
- * 1. 定时检查前台窗口，判断是否为目标 App（红果短剧，包名 com.phoenix.read）
+ * 1. 定时检查前台窗口，判断是否为目标 App（红果短剧 com.phoenix.read / 红果免费漫剧 com.kylin.read）
  * 2. 遍历视图树读取屏幕文字，识别三类广告特征：
  *    - 「N秒后可继续上滑观看短剧」倒计时提示（主特征）
  *    - 右上角「广告」角标（含无倒计时的广告，走兜底等待后上滑）
@@ -226,11 +226,12 @@ class AdSkipService : AccessibilityService() {
         instance = this
         running.value = true
         skipCount.value = Prefs.getSkipCount(this)
-        // 监测列表固定为红果官方包：清理历史遗留（曾因"自动学习"误加其他应用，
-        // 导致"打开红果短剧"提示未安装、并误监测无关应用）
-        if (Prefs.getTargetPackages(this) != setOf(Prefs.DEFAULT_TARGET)) {
-            Prefs.setTargetPackages(this, setOf(Prefs.DEFAULT_TARGET))
-            appendLog("已重置监测列表为：${Prefs.DEFAULT_TARGET}")
+        // 监测列表固定为两款红果官方应用（短剧 + 免费漫剧）：清理历史遗留（曾因"自动学习"
+        // 误加其他应用，导致"打开红果短剧"提示未安装、并误监测无关应用）；
+        // 老版本升级后这一步会自动把「红果免费漫剧」补进监测列表
+        if (Prefs.getTargetPackages(this) != Prefs.DEFAULT_TARGETS) {
+            Prefs.setTargetPackages(this, Prefs.DEFAULT_TARGETS)
+            appendLog("已重置监测列表为：红果短剧 + 红果免费漫剧")
         }
         val dm = resources.displayMetrics
         val orient = if (dm.heightPixels >= dm.widthPixels) "竖屏" else "横屏"

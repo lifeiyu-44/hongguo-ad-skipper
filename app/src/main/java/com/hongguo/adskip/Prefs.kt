@@ -9,6 +9,12 @@ object Prefs {
     /** 红果短剧（红果免费短剧）官方包名 */
     const val DEFAULT_TARGET = "com.phoenix.read"
 
+    /** 红果免费漫剧官方包名（红果系同款应用，广告样式一致） */
+    const val TARGET_MANJU = "com.kylin.read"
+
+    /** 默认监测应用：红果短剧 + 红果免费漫剧（两者一起适配） */
+    val DEFAULT_TARGETS: Set<String> = setOf(DEFAULT_TARGET, TARGET_MANJU)
+
     /** 默认反馈上报地址：云端服务（HTTPS）；局域网电脑接收服务可用 LanDiscovery 发现或手动填 */
     const val DEFAULT_FEEDBACK_URL = "https://123.57.163.149:8443/report"
 
@@ -31,7 +37,7 @@ object Prefs {
     private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun getTargetPackages(ctx: Context): Set<String> =
-        sp(ctx).getStringSet(KEY_TARGETS, setOf(DEFAULT_TARGET))?.toSet() ?: setOf(DEFAULT_TARGET)
+        sp(ctx).getStringSet(KEY_TARGETS, DEFAULT_TARGETS)?.toSet() ?: DEFAULT_TARGETS
 
     fun setTargetPackages(ctx: Context, v: Set<String>) =
         sp(ctx).edit().putStringSet(KEY_TARGETS, v).apply()
