@@ -17,3 +17,6 @@ receiver/server.log
 # 反馈接收服务的升级包目录（本地部署产物，不入库）
 receiver/updates/
 .kotlin/
+
+# 云端服务本地运行产物（不入库）
+cloud/data/

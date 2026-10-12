@@ -24,11 +24,11 @@ object UpdateChecker {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var checking = false
 
-    /** 从上报地址推导服务根地址：http://ip:8765/report -> http://ip:8765 */
+    /** 从上报地址推导服务根地址：https://ip:8443/report -> https://ip:8443（保留原协议） */
     private fun baseUrl(ctx: Context): String? {
         return try {
             val u = URL(Prefs.getFeedbackUrl(ctx))
-            "http://${u.host}:${u.port}"
+            "${u.protocol}://${u.host}${if (u.port == -1) "" else ":${u.port}"}"
         } catch (_: Exception) {
             null
         }
@@ -89,7 +89,7 @@ object UpdateChecker {
         try {
             val dlg = android.app.AlertDialog.Builder(ctx)
                 .setTitle("发现新版本 v$version")
-                .setMessage("从电脑局域网直接下载安装（速度快），确认更新？")
+                .setMessage("从云端服务器直接下载安装，确认更新？")
                 .setPositiveButton("立即更新") { _, _ -> downloadAndInstall(ctx, "$base/update/apk") }
                 .setNegativeButton("稍后", null)
                 .create()

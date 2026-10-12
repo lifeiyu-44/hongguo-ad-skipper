@@ -9,8 +9,8 @@ object Prefs {
     /** 红果短剧（红果免费短剧）官方包名 */
     const val DEFAULT_TARGET = "com.phoenix.read"
 
-    /** 默认反馈上报地址：指向电脑端接收服务（有线网IP；无线 192.168.5.10 作为备用自动回退） */
-    const val DEFAULT_FEEDBACK_URL = "http://192.168.5.2:8765/report"
+    /** 默认反馈上报地址：云端服务（HTTPS）；局域网电脑接收服务可用 LanDiscovery 发现或手动填 */
+    const val DEFAULT_FEEDBACK_URL = "https://123.57.163.149:8443/report"
 
     private const val KEY_TARGETS = "target_packages"
     private const val KEY_AUTO = "auto_swipe"
