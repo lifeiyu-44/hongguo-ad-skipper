@@ -130,6 +130,10 @@ class AdSkipService : AccessibilityService() {
         private const val EMPTY_FLIP_MAX = 4              // 窗口内最多尝试次数（防误翻连环；直播类广告常连续多条，2 次不够）
         private const val EMPTY_FLIP_WINDOW_MS = 300000L  // 次数统计窗口
         private const val FALLBACK_TOTAL_LIMIT_MS = 45000L // 一波广告自动跳过的总时长上限，超时放弃
+        // 用户触碰屏幕后多久内禁止空屏翻页：暂停视频/浏览页面时控件隐藏会让整屏
+        // 变成 0 文字，与无文字直播广告在视图树里一模一样；而真实广告是系统自动
+        // 插入的（用户不会恰好在触屏），触摸静止 12 秒后兜底才恢复工作
+        private const val USER_TOUCH_QUIET_MS = 12000L
 
         // ---- 上滑手势（按屏幕宽高比例计算，手机/平板/横竖屏通用）----
         // 常规起手：从屏幕下部起手，长距离快速滑动
@@ -216,6 +220,7 @@ class AdSkipService : AccessibilityService() {
     private var lastEmptySeenAt = 0L                  // 最近一次见到"空屏"的时间（闪断宽限用）
     private val emptyFlipTimes = ArrayDeque<Long>()   // 画面型广告兜底上滑的时间记录（限额用）
     private var lastEmptyBackAt = 0L                  // 最近一次对空屏用系统返回键的时间（每窗口最多一次）
+    private var lastUserTouchAt = 0L                  // 最近一次用户触碰屏幕的时间（空屏翻页防误翻闸门）
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -363,9 +368,13 @@ class AdSkipService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 以轮询为主；窗口切换事件用来加快响应
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            mainHandler.post(kicker)
+        when (event?.eventType) {
+            // 记录用户真实触摸（本服务注入的手势也可能触发该事件，属可接受的保守误伤）：
+            // 空屏翻页据此避开用户正在暂停/浏览的场景，防止把正常视频误当广告翻掉
+            AccessibilityEvent.TYPE_TOUCH_INTERACTION_START ->
+                lastUserTouchAt = SystemClock.elapsedRealtime()
+            // 以轮询为主；窗口切换事件用来加快响应
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> mainHandler.post(kicker)
         }
     }
 
@@ -679,6 +688,7 @@ class AdSkipService : AccessibilityService() {
                 }
                 if (now - emptySinceAt >= EMPTY_TREE_CONFIRM_MS &&
                     emptyFlipTimes.size < EMPTY_FLIP_MAX &&
+                    now - lastUserTouchAt >= USER_TOUCH_QUIET_MS &&
                     mode == Mode.IDLE
                 ) {
                     emptyFlipTimes.addLast(now)

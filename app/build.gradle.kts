@@ -11,8 +11,8 @@ android {
         applicationId = "com.hongguo.adskip"
         minSdk = 24
         targetSdk = 34
-        versionCode = 52
-        versionName = "1.36.6"
+        versionCode = 53
+        versionName = "1.36.7"
     }
 
     buildTypes {
