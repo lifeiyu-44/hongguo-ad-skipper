@@ -156,7 +156,29 @@ CREATE TABLE IF NOT EXISTS codes (
   expires_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `);
+
+/** 机器用 API Key（X-Api-Key 请求头）：仅授权版本上传/发布，首次启动自动生成 */
+function getApiKey() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'api_key'").get();
+  if (row && row.value) return row.value;
+  const key = 'hgk_' + crypto.randomBytes(24).toString('hex');
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_key', ?)").run(key);
+  log('[初始化] 已生成机器 API Key（可用 /api/admin/apikey 查看）');
+  return key;
+}
+
+/** 版本接口的鉴权：admin 会话 或 X-Api-Key */
+function canPublish(req) {
+  const u = userForRequest(req);
+  if (u && u.role === 'admin') return true;
+  const key = String(req.headers['x-api-key'] || '');
+  return !!key && key === getApiKey();
+}
 
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex');
@@ -628,9 +650,15 @@ async function handle(req, res) {
   /* ---- 管理接口（admin 角色） ---- */
 
   if (pathname.startsWith('/api/admin/')) {
-    const u = userForRequest(req);
-    if (!u) { sendJson(res, 401, { ok: false, error: 'unauthorized' }); return; }
-    if (u.role !== 'admin') { sendJson(res, 403, { ok: false, error: 'forbidden' }); return; }
+    // 版本上传/发布接口：admin 会话 或 X-Api-Key（机器/AI 用）均可
+    const isVersionRoute =
+      pathname === '/api/admin/versions' || pathname === '/api/admin/versions/activate';
+    const versionAuthed = isVersionRoute && canPublish(req);
+    const u = versionAuthed ? null : userForRequest(req);
+    if (!versionAuthed) {
+      if (!u) { sendJson(res, 401, { ok: false, error: 'unauthorized' }); return; }
+      if (u.role !== 'admin') { sendJson(res, 403, { ok: false, error: 'forbidden' }); return; }
+    }
 
     if (req.method === 'GET' && pathname === '/api/admin/stats') {
       const users = db.prepare('SELECT COUNT(*) c FROM users').get().c;
@@ -773,6 +801,19 @@ async function handle(req, res) {
       return;
     }
 
+    if (req.method === 'GET' && pathname === '/api/admin/apikey') {
+      sendJson(res, 200, { ok: true, key: getApiKey() });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/apikey/rotate') {
+      const key = 'hgk_' + crypto.randomBytes(24).toString('hex');
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_key', ?)").run(key);
+      log('[管理] API Key 已轮换');
+      sendJson(res, 200, { ok: true, key });
+      return;
+    }
+
     if (req.method === 'GET' && pathname === '/api/admin/users') {
       sendJson(res, 200, {
         ok: true,
@@ -823,6 +864,7 @@ async function handle(req, res) {
 /* ---------------- 启动 ---------------- */
 
 bootstrapAdmin();
+getApiKey();
 syncVersionFile();
 
 // 全局兜底：保持在线优先
