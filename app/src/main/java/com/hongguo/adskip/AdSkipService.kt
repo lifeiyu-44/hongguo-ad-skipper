@@ -153,7 +153,7 @@ class AdSkipService : AccessibilityService() {
          */
         fun requestFeedback(): Boolean {
             val svc = instance ?: return false
-            return svc.onFeedbackTapped()
+            return svc.onFeedbackTapped(FeedbackSource.IN_APP)
         }
 
         fun clearLogs() {
@@ -989,13 +989,19 @@ class AdSkipService : AccessibilityService() {
 
     // ------------------------------------------------------------------ 一键反馈
 
+    /** 反馈触发来源：决定提交结果提示的措辞（应用内按钮 vs 红果内悬浮按钮） */
+    enum class FeedbackSource { OVERLAY, IN_APP }
+
+    private var feedbackSource = FeedbackSource.OVERLAY
+
     /** 悬浮按钮轻点回调：抓取当前页面截图 + 诊断信息，生成反馈并提交 */
-    fun onFeedbackTapped(): Boolean {
+    fun onFeedbackTapped(source: FeedbackSource = FeedbackSource.OVERLAY): Boolean {
         val now = SystemClock.elapsedRealtime()
         // 冷却 8 秒 + 进行中保护：防止误触导致反复提交、反复弹窗
         if (feedbackBusy || now - lastReportAt < 8000L) return false
         lastReportAt = now
         feedbackBusy = true
+        feedbackSource = source
         mainHandler.post { captureReport() }
         return true
     }
@@ -1085,24 +1091,31 @@ class AdSkipService : AccessibilityService() {
             }
             appendLog("反馈已生成：${txtFile.name}${if (imgFile != null) "（含截图）" else "（无截图）"}")
             // 静默上传（云端服务器，任意网络可用）；
-            // 本 App 不含任何分享面板代码，永远不会弹出分享窗口
+            // 本 App 不含任何分享面板代码，永远不会弹出分享窗口。
+            // 提示措辞按触发来源区分：应用内按钮 / 红果内悬浮按钮（普通用户日志已隐藏，
+            // 提示必须自解释，不能再引导用户"看日志"）
+            val fromApp = feedbackSource == FeedbackSource.IN_APP
             uploadWithFallback(imgFile, txtFile) { ok ->
                 FeedbackOverlay.flashResult(ok)
                 if (ok) {
-                    Toast.makeText(
-                        this,
-                        if (imgFile != null) "反馈已提交到云端 ✓"
-                        else "已提交（未带截图：请到 App 里点「开启屏幕截图」授权）",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    val msg = when {
+                        fromApp && imgFile != null -> getString(R.string.report_ok_app)
+                        fromApp -> getString(R.string.report_ok_app_noshot)
+                        imgFile != null -> getString(R.string.report_ok_overlay)
+                        else -> getString(R.string.report_ok_overlay_noshot)
+                    }
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
                 } else {
                     appendLog("上传失败，10 秒后自动重试")
                     mainHandler.postDelayed({
                         uploadWithFallback(imgFile, txtFile) { ok2 ->
                             Toast.makeText(
                                 this,
-                                if (ok2) "反馈已提交到云端 ✓"
-                                else "上传失败，反馈已保存在手机里（稍后会自动重试，也可检查网络后重试）",
+                                if (ok2) {
+                                    getString(if (fromApp) R.string.report_ok_app else R.string.report_ok_overlay)
+                                } else {
+                                    getString(if (fromApp) R.string.report_fail_app else R.string.report_fail_overlay)
+                                },
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -1163,6 +1176,7 @@ class AdSkipService : AccessibilityService() {
     private fun buildReportText(): String {
         val sb = StringBuilder()
         sb.appendLine("== 红果广告跳过 · 问题反馈 ==")
+        sb.appendLine("来源: " + if (feedbackSource == FeedbackSource.IN_APP) "应用内按钮" else "红果内悬浮按钮")
         sb.appendLine("时间: " + SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
         sb.appendLine("版本: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         sb.appendLine("设备: ${Build.MANUFACTURER} ${Build.MODEL} / Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")

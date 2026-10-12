@@ -31,7 +31,7 @@
     <string name="capture_ready_test">屏幕截图已开启（点此测试）</string>
     <string name="capture_test_ok">截图功能正常 ✓ 反馈将自动带画面</string>
     <string name="capture_test_fail_fmt">截图失败：%1$s</string>
-    <string name="capture_start_fail_fmt">截图授权失败：%1$s（详情已记录，可在反馈日志中查看）</string>
+    <string name="capture_start_fail_fmt">截图授权失败：%1$s（可重新点击按钮再授权）</string>
     <string name="capture_not_needed">本机免授权截图，反馈自动带画面 ✓</string>
     <string name="capture_guide_title">开启反馈截图（仅需一次）</string>
     <string name="capture_guide_msg">你的系统是 Android 10，需要开启一次屏幕截图授权，反馈才能自动附带当前画面。
@@ -45,9 +45,17 @@
     <string name="capture_auth_cancel">未授权，反馈将不带截图</string>
     <string name="btn_check_update">检查更新（云端）</string>
     <string name="btn_quick_report">一键截图上报缺陷</string>
-    <string name="quick_report_started">正在截图并上报…（提交结果见日志/通知）</string>
+    <string name="quick_report_started">正在截图并上报…（完成后会提示结果）</string>
     <string name="quick_report_busy">操作太频繁，请稍后再试</string>
     <string name="quick_report_no_service">请先开启无障碍服务</string>
+
+    <!-- 反馈提交结果：按触发来源区分（应用内按钮 / 红果内悬浮按钮） -->
+    <string name="report_ok_app">应用内反馈已提交云端 ✓</string>
+    <string name="report_ok_app_noshot">应用内反馈已提交（未带截图：请点「开启屏幕截图」授权后再试）</string>
+    <string name="report_ok_overlay">红果内反馈已提交云端 ✓</string>
+    <string name="report_ok_overlay_noshot">红果内反馈已提交（未带截图：请在 App 里点「开启屏幕截图」授权）</string>
+    <string name="report_fail_app">应用内反馈上传失败：已暂存在手机，网络恢复后会自动重试</string>
+    <string name="report_fail_overlay">红果内反馈上传失败：已暂存在手机，稍后会自动重试</string>
 
     <string name="account_title">账号（可选）</string>
     <string name="account_hint">注册登录后，反馈报告自动关联你的邮箱；不注册也可正常使用全部功能</string>
@@ -91,5 +99,5 @@
     <string name="targets_literal">当前监测包名：com.phoenix.read（红果短剧）</string>
 
     <string name="footer_hint">原理：通过无障碍服务读取屏幕上的广告倒计时文字，到点后模拟一次上滑手势。全部处理在本机完成，不联网、不上传任何数据。仅供个人舒适观剧使用。</string>
-    <string name="version_label">版本 1.35.7 · 手机/平板通用 · 云端上报</string>
+    <string name="version_label">版本 1.35.8 · 手机/平板通用 · 云端上报</string>
 </resources>
