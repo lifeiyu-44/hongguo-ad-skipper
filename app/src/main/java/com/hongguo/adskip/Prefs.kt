@@ -20,6 +20,7 @@ object Prefs {
     private const val KEY_COUNT = "skip_count"
     private const val KEY_FB_BTN = "feedback_button"
     private const val KEY_FB_URL = "feedback_url"
+    private const val KEY_URL_MIGRATED = "feedback_url_migrated_v1"
     private const val KEY_FB_Y = "feedback_btn_y"
     private const val KEY_VISUAL_FALLBACK = "visual_ad_fallback"
 
@@ -61,13 +62,35 @@ object Prefs {
         sp(ctx).edit().putBoolean(KEY_FB_BTN, v).apply()
 
     /**
-     * 反馈上报服务器地址：默认指向电脑端接收服务。
+     * 反馈上报服务器地址：默认指向云端服务。
      * 任何「未设置 / 空值」都一律回落到默认地址，确保一键反馈永远走静默上传，
      * 不会因为地址栏为空而弹出分享面板。
      */
     fun getFeedbackUrl(ctx: Context): String {
+        migrateLegacyUrl(ctx)
         val v = sp(ctx).getString(KEY_FB_URL, null)
         return if (v.isNullOrBlank()) DEFAULT_FEEDBACK_URL else v
+    }
+
+    /** 旧版默认的局域网地址（仅用于一次性迁移判断） */
+    private val LEGACY_LAN_URLS = setOf(
+        "http://192.168.5.2:8765/report",
+        "http://192.168.5.10:8765/report",
+    )
+
+    /**
+     * 一次性迁移：老版本把局域网电脑地址保存进了设置，升级后仍会覆盖云端默认地址，
+     * 导致外网（手机流量）下上报/更新全部连不上。这里把「恰好等于旧默认值」的
+     * 保存项清掉回落到云端默认；迁移只做一次，之后用户手动保存/自动发现的地址不再动。
+     */
+    private fun migrateLegacyUrl(ctx: Context) {
+        val sp = sp(ctx)
+        if (sp.getBoolean(KEY_URL_MIGRATED, false)) return
+        val saved = sp.getString(KEY_FB_URL, null)
+        if (saved != null && saved in LEGACY_LAN_URLS) {
+            sp.edit().remove(KEY_FB_URL).apply()
+        }
+        sp.edit().putBoolean(KEY_URL_MIGRATED, true).apply()
     }
 
     fun setFeedbackUrl(ctx: Context, v: String) = sp(ctx).edit().putString(KEY_FB_URL, v).apply()
