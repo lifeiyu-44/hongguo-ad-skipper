@@ -24,6 +24,7 @@
       - 构建成功后：
         - APK 复制到桌面并命名「红果广告跳过-vX.Y.apk」，删除桌面其它「红果广告跳过*.apk」旧文件；
         - 同步升级源：复制到 `receiver/updates/HongguoAdSkipper.apk`，写 `receiver/updates/version.json` 内容 `{"version":"X.Y"}`（服务实时读取，无需重启）；
+        - 云端发版（可选）：登录云端 admin API 上传 APK 并激活版本；**备注必须先写入 UTF-8 文件再 `-F "note=<备注文件"` 上传**，严禁命令行内联中文——Windows 会按 GBK 编码命令行参数，云端按 UTF-8 存储即成乱码（历史乱码用 `cloud/fix-notes.sh` 在服务器上运行修复）；
         - `git add -A && git commit`；`git push origin main`（仓库已配代理 http://127.0.0.1:12334；失败可试 `git -c http.proxy= -c https.proxy= push` 直连；再失败留待下次补推）；
         - `gh release create vX.Y` 上传两个资产（HongguoAdSkipper-vX.Y.apk 与 HongguoAdSkipper.apk）；若报 TLS 超时，加 `HTTPS_PROXY=http://127.0.0.1:12334 HTTP_PROXY=http://127.0.0.1:12334` 前缀重试。
       - 构建失败：`git checkout --` 回退本次改动，记录失败原因。
